@@ -1,0 +1,9 @@
+# firmware images, extracted artifacts, build output, scratch work: never committed
+/fw/
+/build/
+/scratch/
+*.o
+*.so
+# Ubiquiti proprietary material must never be committed
+utr-ui-stock*.tar.gz
+/docs/agent-brief.md
