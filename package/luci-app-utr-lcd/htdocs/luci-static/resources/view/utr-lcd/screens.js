@@ -25,6 +25,7 @@ var TYPES = {
 	ssid:        { label: 'Network name',          group: 'general', sizes: [16, 24, 32], def: 24 },
 	dbm:         { label: 'Signal strength',       group: 'general', sizes: [16, 24, 32], def: 32 },
 	bars:        { label: 'Signal (bars)',         group: 'general', sizes: [16, 24, 32], def: 24 },
+	dot:         { label: 'Online status (dot)',   group: 'general', sizes: [16, 24, 32], def: 16 },
 	clients:     { label: 'Client count',          group: 'general', sizes: [16, 24, 32], def: 24 },
 	wanip:       { label: 'WAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
 	lanip:       { label: 'LAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
@@ -73,11 +74,29 @@ function availableHeight(indicator) {
 	return 233 - (indicator === 'pill' ? 32 : indicator === 'none' ? 6 : 19);
 }
 
+/* Heights of the lines: widgets joined with the next one share a line (its height is the max). */
+function lineHeights(widgets) {
+	var lines = [], cur = 0;
+	widgets.forEach(function(w, i) {
+		cur = Math.max(cur, widgetHeight(w[0], w[1]));
+		if (!w[2] || i === widgets.length - 1) { lines.push(cur); cur = 0; }
+	});
+	return lines;
+}
+
 function usedHeight(widgets, spacing) {
-	var sum = 0;
-	widgets.forEach(function(w) { sum += widgetHeight(w[0], w[1]); });
+	var lines = lineHeights(widgets), sum = 0;
+	lines.forEach(function(h) { sum += h; });
 	var gap = spacing && spacing !== 'auto' ? +spacing : GAP;
-	return sum + (widgets.length > 1 ? gap * (widgets.length - 1) : 0);
+	return sum + (lines.length > 1 ? gap * (lines.length - 1) : 0);
+}
+
+/* How many widgets are in the joined line containing index wi (at most 3 fit, see MAX_SUB). */
+function groupSize(widgets, wi) {
+	var n = 1, i;
+	for (i = wi; i > 0 && widgets[i - 1][2]; i--) n++;
+	for (i = wi; i < widgets.length - 1 && widgets[i][2]; i++) n++;
+	return n;
 }
 
 function parseWidget(str) {
@@ -85,7 +104,14 @@ function parseWidget(str) {
 	if (!t) return null;
 	var size = +p[1];
 	if (!size || (t.sizes && t.sizes.indexOf(size) < 0)) size = t.def;
-	return [p[0], size];
+	return [p[0], size, false];
+}
+
+/* One config item: "type:size" or several joined by '+' for one shared line. */
+function parseWidgetList(str) {
+	var parts = String(str).split('+').map(parseWidget).filter(function(w) { return w; });
+	parts.forEach(function(w, i) { w[2] = i < parts.length - 1; });
+	return parts;
 }
 
 /* The layout in the flat key=value format the renderer reads (same as utr-lcd.init writes). */
@@ -97,7 +123,11 @@ function flatten(main, screens) {
 	screens.forEach(function(s) {
 		out.push('screen=' + String(s.name).replace(/[\r\n]/g, ' '), 'dwell=' + s.dwell, 'spacing=' + (s.spacing || 'auto'), 'enabled=' + (s.enabled ? 1 : 0),
 			'indicator=' + s.indicator, 'backfill=' + (s.backfill ? 1 : 0));
-		s.widgets.forEach(function(w) { out.push('widget=' + w[0] + ':' + w[1]); });
+		var line = [];
+		s.widgets.forEach(function(w, i) {
+			line.push(w[0] + ':' + w[1]);
+			if (!w[2] || i === s.widgets.length - 1) { out.push('widget=' + line.join('+')); line = []; }
+		});
 	});
 	return out.join('\n');
 }
@@ -185,7 +215,7 @@ return view.extend({
 				spacing: (s.spacing === 'auto' || /^[0-9]+$/.test(s.spacing || '')) ? (s.spacing || 'auto') : 'auto',
 				indicator: [ 'dot', 'pill', 'none' ].indexOf(s.indicator) >= 0 ? s.indicator : 'dot',
 				backfill: bool(s.backfill, true),
-				widgets: list.map(parseWidget).filter(function(w) { return w; })
+				widgets: list.reduce(function(acc, item) { return acc.concat(parseWidgetList(item)); }, [])
 			};
 		});
 		if (!screens.length)
@@ -259,10 +289,14 @@ return view.extend({
 
 		function widgetRow(sc, wi) {
 			var w = sc.widgets[wi], t = TYPES[w[0]];
+			var joinFull = !w[2] && groupSize(sc.widgets, wi) >= 3;
 			return E('tr', {}, [
 				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
 					w[0] = v; w[1] = TYPES[v].def; redraw();
 				}, { 'style': 'width:100%; max-width:13em' })),
+				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
+					'checked': w[2] ? '' : null, 'disabled': (wi === sc.widgets.length - 1 || joinFull) ? '' : null,
+					'change': function() { w[2] = this.checked; redraw(); } })),
 				E('td', {}, t.sizes ? select(t.sizes.map(function(s) { return [ s, sizeLabel(t, s) ]; }), w[1], function(v) {
 					w[1] = +v; redraw();
 				}) : E('span', { 'style': 'opacity:.6' }, '-')),
@@ -328,7 +362,7 @@ return view.extend({
 				E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start' }, [
 					E('div', { 'style': 'flex:1 1 300px; min-width:0' }, [
 						sc.widgets.length ? E('div', { 'style': 'overflow-x:auto' }, E('table', { 'class': 'table', 'style': 'width:100%' }, [
-							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
+							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Join next')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
 						].concat(sc.widgets.map(function(_w, wi) { return widgetRow(sc, wi); })))) : E('em', {}, _('Nothing on this screen yet.')),
 						E('div', { 'style': 'margin-top:8px' }, addSel),
 						meter,
@@ -427,7 +461,12 @@ return view.extend({
 			uci.set('utr-lcd', sid, 'enabled', s.enabled ? '1' : '0');
 			uci.set('utr-lcd', sid, 'indicator', s.indicator);
 			uci.set('utr-lcd', sid, 'backfill', s.backfill ? '1' : '0');
-			uci.set('utr-lcd', sid, 'widget', s.widgets.map(function(w) { return w[0] + ':' + w[1]; }));
+			var wlist = [], line = [];
+			s.widgets.forEach(function(w, i) {
+				line.push(w[0] + ':' + w[1]);
+				if (!w[2] || i === s.widgets.length - 1) { wlist.push(line.join('+')); line = []; }
+			});
+			uci.set('utr-lcd', sid, 'widget', wlist);
 		});
 		return uci.save();
 	},
