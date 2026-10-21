@@ -122,16 +122,17 @@ function parseWidget(str) {
 	var size = parseInt(p[1], 10);
 	if (!size || (t.sizes && t.sizes.indexOf(size) < 0)) size = t.def;
 	var o = p[1] || '', bg = /b([0-5])/.exec(o);
-	/* [type, size, join, wrap, shrink, bg, fit, cores, inline, generic, noname, noicon, showval] - flags
-	 * after the size: w wrap, s shrink (ssid), b0..b5 legend bg, f/F fit, c per-core, l/g/n/i uplinks, v speed value */
+	/* [type, size, join, wrap, shrink, bg, fit, cores, inline, generic, noname, noicon, showval, peak, split] - flags
+	 * after the size: w wrap, s shrink (ssid), b0..b5 legend bg, f/F fit, c per-core, l/g/n/i uplinks, v speed value,
+	 * p legend peak scaling, x legend split up/down bar */
 	return [p[0], size, false, /w/.test(o), /s/.test(o), bg ? +bg[1] : 0, /F/.test(o) ? 2 : /f/.test(o) ? 1 : 0,
-		/r/.test(o) ? 2 : /c/.test(o) ? 1 : 0, /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o), /v/.test(o)];
+		/r/.test(o) ? 2 : /c/.test(o) ? 1 : 0, /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o), /v/.test(o), /p/.test(o), /x/.test(o)];
 }
 
 function widgetSpec(w) {
 	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '') +
 		(w[5] ? 'b' + w[5] : '') + (w[6] === 2 ? 'F' : w[6] === 1 ? 'f' : '') + (w[7] === 2 ? 'r' : w[7] ? 'c' : '') + (w[8] ? 'l' : '') + (w[9] ? 'g' : '') +
-		(w[10] ? 'n' : '') + (w[11] ? 'i' : '') + (w[12] ? 'v' : '');
+		(w[10] ? 'n' : '') + (w[11] ? 'i' : '') + (w[12] ? 'v' : '') + (w[13] ? 'p' : '') + (w[14] ? 'x' : '');
 }
 
 /* One config item: "type:size" or several joined by '+' for one shared line. */
@@ -320,7 +321,11 @@ return view.extend({
 			if (w[0] === 'legend' || w[0] === 'legendtotal')
 				return E('td', {}, [
 					select([ [ '0', _('Background: none') ], [ '1', _('Background: speed') ], [ '2', _('Background: total') ], [ '3', _('Background: signal') ], [ '4', _('Background: signal + speed') ], [ '5', _('Background: signal + total') ] ], w[5] || 0, function(v) { w[5] = +v; redraw(); }, { 'style': 'width:100%; max-width:11em' }),
-					select([ [ '0', _('Fit: off') ], [ '1', _('Fit: gentle') ], [ '2', _('Fit: compact') ] ], w[6] || 0, function(v) { w[6] = +v; redraw(); }, { 'style': 'width:100%; max-width:9em; margin-top:2px' })
+					select([ [ '0', _('Fit: off') ], [ '1', _('Fit: gentle') ], [ '2', _('Fit: compact') ] ], w[6] || 0, function(v) { w[6] = +v; redraw(); }, { 'style': 'width:100%; max-width:9em; margin-top:2px' }),
+					E('div', { 'style': 'margin-top:2px' }, [
+						check(!!w[13], function(v) { w[13] = v; redraw(); }, _('Scale by peak seen')),
+						check(!!w[14], function(v) { w[14] = v; redraw(); }, _('Split up/down'))
+					])
 				]);
 			if (w[0] === 'cpu')
 				return E('td', {}, select([ [ '0', _('Bar: total') ], [ '1', _('Bar: per-core segments') ], [ '2', _('Bar: per-core rows') ] ], w[7] || 0, function(v) { w[7] = +v; redraw(); }, { 'style': 'width:100%; max-width:11em' }));
@@ -341,7 +346,7 @@ return view.extend({
 			var joinFull = !w[2] && groupSize(sc.widgets, wi) >= 3;
 			return E('tr', {}, [
 				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
-					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = 0; w[8] = false; w[9] = false; w[10] = false; w[11] = false; w[12] = false; redraw();
+					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = 0; w[8] = false; w[9] = false; w[10] = false; w[11] = false; w[12] = false; w[13] = false; w[14] = false; redraw();
 				}, { 'style': 'width:100%; max-width:13em' })),
 				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
 					'checked': w[2] ? '' : null, 'disabled': (wi === sc.widgets.length - 1 || joinFull) ? '' : null,

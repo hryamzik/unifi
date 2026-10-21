@@ -452,8 +452,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_PLAYLIST 32
 
 #define MAX_SUB 3
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval; } wspec_t;   /* bg/fit: legend; cores: cpu; layout/generic/noname/noicon: uplinks */
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split; } wspec_t;   /* bg/fit/peak/split: legend; cores: cpu; layout/generic/noname/noicon: uplinks */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill, debug;
@@ -534,6 +534,8 @@ static void conf_line(config_t *c, char *line)
 					specs[n].noname = colon && strchr(colon, 'n') ? 1 : 0;   /* uplinks:24n: no labels, icons only */
 					specs[n].noicon = colon && strchr(colon, 'i') ? 1 : 0;   /* uplinks:24i: no icons, labels only */
 					specs[n].showval = colon && strchr(colon, 'v') ? 1 : 0;   /* speeddn:12v: total speed written on the bar */
+					specs[n].peak = colon && strchr(colon, 'p') ? 1 : 0;   /* legend:4b4p: bar scaled by the peak rate seen, not the current max */
+					specs[n].split = colon && strchr(colon, 'x') ? 1 : 0;   /* legend:4b4x: bar split into upload (thin, top) and download */
 					specs[n].fit = colon && strchr(colon, 'F') ? 2 : colon && strchr(colon, 'f') ? 1 : 0;   /* legend fit: f gentle, F compact */
 					if (colon) {   /* legend background: b0..b5 (none speed total signal signal+speed signal+total) */
 						const char *b = strchr(colon, 'b');
@@ -556,6 +558,8 @@ static void conf_line(config_t *c, char *line)
 			s->w[s->nw].noname = specs[0].noname;
 			s->w[s->nw].noicon = specs[0].noicon;
 			s->w[s->nw].showval = specs[0].showval;
+			s->w[s->nw].peak = specs[0].peak;
+			s->w[s->nw].split = specs[0].split;
 			s->nw++;
 		} else if (n > 1) {
 			widget_t *wd = &s->w[s->nw++];
@@ -916,7 +920,7 @@ static int legend_rows(const traffic_t *t, int by_total, int rows)
  * at the row's bottom edge, the rest a dim bar in the client's colour, widest client = full
  * width). Optional fit (1 gentle, 2 compact): when clients overflow, squeeze the row pitch,
  * then (compact only) the font, to show more of them in the same height. */
-static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_total, int rows, int y, int h, int name_len, int bg, int fit)
+static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_total, int rows, int y, int h, int name_len, int bg, int fit, int peak, int split)
 {
 	(void)rows;   /* row count comes from h, the height widget_h reserved */
 	static const int PITCH[3] = { 17, 15, 13 };
@@ -932,8 +936,31 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 	const font_t *nf = step >= 2 ? &FONT_T12 : &FONT_T16, *vf = step >= 2 ? &FONT_T12 : &FONT_T16B;
 	int named = n > r ? r - 1 : n;        /* leave the last row for "+k others" */
 	int bgmode = bg == 2 || bg == 5 ? BM_TOTAL : BM_RATE, hasbg = bg == 1 || bg == 2 || bg == 4 || bg == 5;
-	double bgmax = 0;
-	if (hasbg) for (int i = 0; i < named; i++) { double v = client_val(&t->c[idx[i]], bgmode); if (v > bgmax) bgmax = v; }
+	double bgmax = 0, maxd = 0, maxu = 0;          /* bgmax: what the plain bar divides by; maxd/maxu: per direction (split bar) */
+	if (hasbg) for (int i = 0; i < named; i++) {
+		const cl_t *cc = &t->c[idx[i]];
+		double v = client_val(cc, bgmode), dv = bgmode == BM_TOTAL ? cc->dtot : cc->drate, uv = bgmode == BM_TOTAL ? cc->utot : cc->urate;
+		if (v > bgmax) bgmax = v;
+		if (dv > maxd) maxd = dv;
+		if (uv > maxu) maxu = uv;
+	}
+	if (peak && hasbg && bgmode == BM_RATE && t->valid) {
+		/* scale by the fastest rate seen so far instead of the current leader (who is always
+		 * full width); the peak is forgotten slowly, halved every 10 minutes */
+		static double pk_r, pk_d, pk_u;
+		static time_t pk_t;
+		time_t now = time(NULL);
+		if (!pk_t) pk_t = now;
+		while (now - pk_t >= 600) { pk_r /= 2; pk_d /= 2; pk_u /= 2; pk_t += 600; }
+		for (int i = 0; i < t->n; i++) {
+			if (t->c[i].rate > pk_r) pk_r = t->c[i].rate;
+			if (t->c[i].drate > pk_d) pk_d = t->c[i].drate;
+			if (t->c[i].urate > pk_u) pk_u = t->c[i].urate;
+		}
+		if (pk_r > bgmax) bgmax = pk_r;
+		if (pk_d > maxd) maxd = pk_d;
+		if (pk_u > maxu) maxu = pk_u;
+	}
 	char nm[48], val[16];
 	for (int i = 0; i < r; i++, y += pitch) {
 		sp = span_for(w, y, pitch);          /* rows near a corner are narrower */
@@ -946,8 +973,20 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 			else ellipsize(nf, c->name, room, 0, nm, sizeof(nm));
 			int bw = 0;
 			if (hasbg && bgmax > 0) {                 /* background bar: this client's share of the widest */
-				bw = (sp.x1 + 1 - sp.x0) * (int)(client_val(c, bgmode) * 100 / bgmax) / 100;
-				if (bw > 0) lcd_fill(l, sp.x0, y, bw, pitch - 1, dim_color(bar_color(PALETTE[c->color]), 65));
+				uint32_t col = dim_color(bar_color(PALETTE[c->color]), 65);
+				if (split && (maxd > 0 || maxu > 0)) {          /* upload: thin strip on top; download below, no gap */
+					int bh = pitch - 1, uh = bh / 3, spanw = sp.x1 + 1 - sp.x0;
+					double dv = bgmode == BM_TOTAL ? c->dtot : c->drate, uv = bgmode == BM_TOTAL ? c->utot : c->urate;
+					int uw = maxu > 0 ? spanw * (int)(uv * 100 / maxu) / 100 : 0;
+					int dw = maxd > 0 ? spanw * (int)(dv * 100 / maxd) / 100 : 0;
+					if (uh < 2) uh = 2;
+					if (uw > 0) lcd_fill(l, sp.x0, y, uw, uh, col);
+					if (dw > 0) lcd_fill(l, sp.x0, y + uh, dw, bh - uh, col);
+					bw = uw > dw ? uw : dw;
+				} else {
+					bw = (sp.x1 + 1 - sp.x0) * (int)(client_val(c, bgmode) * 100 / bgmax) / 100;
+					if (bw > 0) lcd_fill(l, sp.x0, y, bw, pitch - 1, col);
+				}
 			}
 			/* text that sits on the bright bar turns dark, like the values on the direction bars */
 			uint32_t namecol = bw > 12 + lcd_text_w(nf, nm, 1) / 2 ? RGB(10, 12, 16) : C_WHITE;
@@ -1407,7 +1446,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
 		int m = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split };
 			int hh = widget_h(&t, c);
 			if (hh > m) m = hh;
 		}
@@ -1484,12 +1523,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		/* visible members get equal cells of the span, each drawn centred in its cell */
 		int vis[MAX_SUB], nv = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split };
 			if (widget_h(&t, c)) vis[nv++] = i;
 		}
 		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
 		for (int k = 0; k < nv; k++) {
-			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon, .showval = wd->sub[vis[k]].showval };
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon, .showval = wd->sub[vis[k]].showval, .peak = wd->sub[vis[k]].peak, .split = wd->sub[vis[k]].split };
 			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
 			widget_draw_sp(l, w, &t, c, y, h, cell);
 		}
@@ -1618,8 +1657,8 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		else copy(buf, sizeof(buf), "--");
 		row_text(l, sp, y, h, wd->size, "Total", buf, C_WHITE, 0, NULL, 0, &c->row_step);
 		break;
-	case W_LEGEND: draw_legend(l, w, c->tr, 0, wd->size, y, h, c->name_len, wd->bg, wd->fit); break;
-	case W_LEGENDTOTAL: draw_legend(l, w, c->tr, 1, wd->size, y, h, c->name_len, wd->bg, wd->fit); break;
+	case W_LEGEND: draw_legend(l, w, c->tr, 0, wd->size, y, h, c->name_len, wd->bg, wd->fit, wd->peak, wd->split); break;
+	case W_LEGENDTOTAL: draw_legend(l, w, c->tr, 1, wd->size, y, h, c->name_len, wd->bg, wd->fit, wd->peak, wd->split); break;
 	case W_DONUT: draw_donut(l, c->tr, (sp.x0 + sp.x1 + 1) / 2, y + h / 2, (wd->size - 2) / 2); break;
 	case W_MULTIWAN: draw_multiwan(l, w, s, c->tr, wd->size, y); break;
 	case W_UPLINKS: draw_uplinks(l, sp, y, wd->size, s, c->tr, wd->layout, wd->generic, wd->noname, wd->noicon); break;
@@ -1724,7 +1763,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			for (int j = 0; j < sc->w[i].nsub; j++) {
 				int st = sc->w[i].sub[j].type;
 				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
-					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon, .showval = sc->w[i].sub[j].showval };
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon, .showval = sc->w[i].sub[j].showval, .peak = sc->w[i].sub[j].peak, .split = sc->w[i].sub[j].split };
 					widget_draw(NULL, w, &mt, &c, top, hs[i]);
 				}
 			}
