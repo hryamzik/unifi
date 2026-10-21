@@ -453,8 +453,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_PLAYLIST 32
 
 #define MAX_SUB 3
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split; } wspec_t;   /* bg/fit/peak/split: legend; cores: cpu; layout/generic/noname/noicon: uplinks */
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split, graph; } wspec_t;   /* bg/fit/peak/split: legend; cores: cpu; layout/generic/noname/noicon: uplinks; graph: cpuram */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split, graph; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill, debug;
@@ -537,6 +537,7 @@ static void conf_line(config_t *c, char *line)
 					specs[n].showval = colon && strchr(colon, 'v') ? 1 : 0;   /* speeddn:12v: total speed written on the bar */
 					specs[n].peak = colon && strchr(colon, 'p') ? 1 : 0;   /* legend:4b4p: bar scaled by the peak rate seen, not the current max */
 					specs[n].split = colon && strchr(colon, 'x') ? 1 : 0;   /* legend:4b4x: bar split into upload (thin, top) and download */
+					specs[n].graph = colon && strchr(colon, 'G') ? 1 : 0;   /* cpuram:12G: graphs only (per-core strips + RAM bar), no text */
 					specs[n].fit = colon && strchr(colon, 'F') ? 2 : colon && strchr(colon, 'f') ? 1 : 0;   /* legend fit: f gentle, F compact */
 					if (colon) {   /* legend background: b0..b5 (none speed total signal signal+speed signal+total) */
 						const char *b = strchr(colon, 'b');
@@ -561,6 +562,7 @@ static void conf_line(config_t *c, char *line)
 			s->w[s->nw].showval = specs[0].showval;
 			s->w[s->nw].peak = specs[0].peak;
 			s->w[s->nw].split = specs[0].split;
+			s->w[s->nw].graph = specs[0].graph;
 			s->nw++;
 		} else if (n > 1) {
 			widget_t *wd = &s->w[s->nw++];
@@ -1118,18 +1120,37 @@ static void draw_bar_row(lcd_t *l, span_t sp, int y, int h, int size, const char
 }
 
 /* Resource row: bar (green, amber above 60 %, red above 85 %), value in percent. */
-static void draw_resource(lcd_t *l, span_t sp, int y, int h, int size, const char *label, int pct, uint32_t track)
+static void draw_resource(lcd_t *l, span_t sp, int y, int h, int size, const char *label, int pct, int ok_below, int warn_below)
 {
-	(void)track;
 	char val[8];
 	snprintf(val, sizeof(val), "%d%%", pct);
-	draw_bar_row(l, sp, y, h, size, label, pct, val, pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD);
+	draw_bar_row(l, sp, y, h, size, label, pct, val, pct < ok_below ? C_OK : pct < warn_below ? C_WARN : C_BAD);
 }
 
 /* CPU and RAM on one line, each in its own half: label, small bar, percent. On screens that are
  * not a stack of resource rows the aligned label column of draw_bar_row just wastes room. */
-static void draw_cpuram(lcd_t *l, span_t sp, int y, int h, int size, const res_t *r)
+static void draw_cpuram(lcd_t *l, span_t sp, int y, int h, int size, const res_t *r, int graph)
 {
+	if (graph) {          /* no text: CPU as one strip per core, RAM as one bar, same two halves */
+		int mid = (sp.x0 + sp.x1 + 1) / 2, x0 = sp.x0, x1 = mid - 4, x2 = mid + 3;
+		if (r->ncores > 0) {
+			int n = r->ncores, sh = (size - (n - 1)) / n, by = y + (h - (sh * n + (n - 1))) / 2;
+			if (sh < 2) sh = 2;
+			for (int i = 0; i < n; i++) {
+				int pct = r->core[i] > 100 ? 100 : r->core[i], bw = x1 + 1 - x0;
+				lcd_fill(l, x0, by + i * (sh + 1), bw, sh, C_TRACK);
+				if (bw * pct / 100 >= 2) lcd_fill(l, x0, by + i * (sh + 1), bw * pct / 100, sh, pct < 50 ? C_OK : pct < 80 ? C_WARN : C_BAD);
+			}
+		} else {
+			int bh = size >= 16 ? 8 : 6, pct = r->cpu > 100 ? 100 : r->cpu;
+			lcd_rrect(l, x0, y + (h - bh) / 2, x1 + 1 - x0, bh, 3, C_TRACK);
+			if ((x1 + 1 - x0) * pct / 100 >= 3) lcd_rrect(l, x0, y + (h - bh) / 2, (x1 + 1 - x0) * pct / 100, bh, 3, pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD);
+		}
+		int bh = size >= 16 ? 8 : 6, pct = r->ram > 100 ? 100 : r->ram, bw = sp.x1 + 1 - x2;
+		lcd_rrect(l, x2, y + (h - bh) / 2, bw, bh, 3, C_TRACK);
+		if (bw * pct / 100 >= 3) lcd_rrect(l, x2, y + (h - bh) / 2, bw * pct / 100, bh, 3, pct < 80 ? C_OK : pct < 90 ? C_WARN : C_BAD);
+		return;
+	}
 	const font_t *lf = size >= 16 ? &FONT_T16 : &FONT_T12, *vf = size >= 16 ? &FONT_T16B : &FONT_T12;
 	const struct { const char *lab; int pct; } it[2] = { { "CPU", r->cpu }, { "RAM", r->ram } };
 	int mid = (sp.x0 + sp.x1 + 1) / 2, bh = size >= 16 ? 8 : 6;
@@ -1143,7 +1164,7 @@ static void draw_cpuram(lcd_t *l, span_t sp, int y, int h, int size, const res_t
 		if (bw >= 8) {
 			int pct = it[i].pct > 100 ? 100 : it[i].pct, fw = bw * pct / 100;
 			lcd_rrect(l, bx, y + (h - bh) / 2, bw, bh, 3, C_TRACK);
-			if (fw >= 3) lcd_rrect(l, bx, y + (h - bh) / 2, fw, bh, 3, pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD);
+			if (fw >= 3) lcd_rrect(l, bx, y + (h - bh) / 2, fw, bh, 3, pct < (i ? 80 : 60) ? C_OK : pct < (i ? 90 : 85) ? C_WARN : C_BAD);   /* RAM stays green to 80% */
 		}
 		lcd_draw(l, vf, x1 + 1 - vw, y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
 	}
@@ -1487,7 +1508,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
 		int m = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split, .graph = wd->sub[i].graph };
 			int hh = widget_h(&t, c);
 			if (hh > m) m = hh;
 		}
@@ -1564,12 +1585,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		/* visible members get equal cells of the span, each drawn centred in its cell */
 		int vis[MAX_SUB], nv = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split, .graph = wd->sub[i].graph };
 			if (widget_h(&t, c)) vis[nv++] = i;
 		}
 		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
 		for (int k = 0; k < nv; k++) {
-			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon, .showval = wd->sub[vis[k]].showval, .peak = wd->sub[vis[k]].peak, .split = wd->sub[vis[k]].split };
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon, .showval = wd->sub[vis[k]].showval, .peak = wd->sub[vis[k]].peak, .split = wd->sub[vis[k]].split, .graph = wd->sub[vis[k]].graph };
 			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
 			widget_draw_sp(l, w, &t, c, y, h, cell);
 		}
@@ -1706,7 +1727,7 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 	case W_CPU:
 		if (wd->cores == 2 && c->res->ncores > 0) draw_core_rows(l, sp, y, h, c->row_step ? 12 : wd->size, c->res);
 		else if (wd->cores == 1 && c->res->ncores > 0) draw_core_bar(l, sp, y, h, c->row_step ? 12 : wd->size, c->res);
-		else draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "CPU", c->res->cpu, C_TRACK);
+		else draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "CPU", c->res->cpu, 60, 85);
 		break;
 	case W_LOAD: {
 		/* Background bar behind the row (like the legend's), width = load vs all cores;
@@ -1725,9 +1746,9 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		lcd_draw(l, vf, sp.x1 + 1 - lcd_text_w(vf, val, 1), y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
 		break;
 	}
-	case W_RAM: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "RAM", c->res->ram, C_TRACK); break;
-	case W_CPURAM: draw_cpuram(l, sp, y, h, c->row_step ? 12 : wd->size, c->res); break;
-	case W_FLASH: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "Flash", c->res->flash, C_TRACK); break;
+	case W_RAM: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "RAM", c->res->ram, 80, 90); break;   /* RAM: green below 80% */
+	case W_CPURAM: draw_cpuram(l, sp, y, h, c->row_step ? 12 : wd->size, c->res, wd->graph); break;
+	case W_FLASH: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "Flash", c->res->flash, 60, 85); break;
 	case W_TEMP: {
 		int big = wd->size >= 16 && !c->row_step;
 		const font_t *lf = big ? &FONT_T16 : &FONT_T12, *vf = big ? &FONT_T16B : &FONT_T12;
@@ -1805,7 +1826,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			for (int j = 0; j < sc->w[i].nsub; j++) {
 				int st = sc->w[i].sub[j].type;
 				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
-					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon, .showval = sc->w[i].sub[j].showval, .peak = sc->w[i].sub[j].peak, .split = sc->w[i].sub[j].split };
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon, .showval = sc->w[i].sub[j].showval, .peak = sc->w[i].sub[j].peak, .split = sc->w[i].sub[j].split, .graph = sc->w[i].sub[j].graph };
 					widget_draw(NULL, w, &mt, &c, top, hs[i]);
 				}
 			}
