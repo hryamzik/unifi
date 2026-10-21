@@ -51,7 +51,7 @@ var TYPES = {
 
 var DEFAULT_SCREENS = [
 	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, backfill: false,
-	  widgets: [ ['segbar', 16], ['ssid', 24], ['dbm', 32], ['rule', 2], ['status', 16, true], ['clients', 24] ] },
+	  widgets: [ ['status', 16], ['segbar', 16], ['dbm', 32], ['ssid', 24], ['clients', 24] ] },
 	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, backfill: true,
 	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
 	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, backfill: true,
@@ -155,6 +155,7 @@ function decodeRle(text) {
 var SCENARIOS = {
 	none:       [],
 	weak:       [ 'up_signal=-82', 'up0_signal=-82' ],
+	longssid:   [ 'up_name=Hotel-Guest-WiFi-Conference-Room-5G', 'up0_name=Hotel-Guest-WiFi-Conference-Room-5G' ],
 	ethernet:   [ 'up_type=eth', 'up_name=Ethernet', 'up_speed=1000', 'up_signal=', 'up0_type=eth', 'up0_name=Ethernet', 'up0_speed=1000', 'up0_signal=' ],
 	nouplink:   [ 'up_state=down', 'ups=0' ],
 	nointernet: [ 'inet=fail' ],
@@ -337,7 +338,7 @@ return view.extend({
 					: _('%d of %d px used, %d px free').format(used, avail, avail - used))
 			]);
 
-			var canvas = E('canvas', { 'width': 136, 'height': 240, 'style': 'width:' + (136 * SCALE) + 'px; height:' + (240 * SCALE) + 'px; image-rendering:pixelated; background:#000' });
+			var canvas = E('canvas', { 'width': 136, 'height': 240, 'style': 'width:' + (136 * SCALE) + 'px; height:' + (240 * SCALE) + 'px; image-rendering:pixelated' });
 			var note = E('div', { 'style': 'color:#d33; max-width:' + (136 * SCALE) + 'px' });
 			canvases[si] = canvas;
 			notes[si] = note;
@@ -399,7 +400,7 @@ return view.extend({
 				E('h3', { 'style': 'margin-top:14px' }, _('Preview data')),
 				E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:14px; align-items:center' }, [
 					select([ [ 'live', _('Live data from this router') ], [ 'example', _('Example data (Wi-Fi + Ethernet, VPN, clients)') ] ], preview.source, function(v) { preview.source = v; schedulePreview(); }),
-					select([ [ 'none', _('As is') ], [ 'weak', _('What if: weak Wi-Fi') ], [ 'ethernet', _('What if: wired uplink') ], [ 'nouplink', _('What if: no uplink') ],
+					select([ [ 'none', _('As is') ], [ 'weak', _('What if: weak Wi-Fi') ], [ 'longssid', _('What if: long Wi-Fi name') ], [ 'ethernet', _('What if: wired uplink') ], [ 'nouplink', _('What if: no uplink') ],
 						[ 'nointernet', _('What if: no internet') ], [ 'vpnup', _('What if: VPN connected') ], [ 'vpndown', _('What if: VPN down') ], [ 'novpn', _('What if: no VPN') ] ],
 						preview.scenario, function(v) { preview.scenario = v; schedulePreview(); }),
 					E('small', { 'style': 'opacity:.7' }, _('The preview is drawn by the router itself with the settings on this page, saved or not. The rounded corners are cut off by the bezel.'))
