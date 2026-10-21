@@ -778,6 +778,16 @@ static void draw_tri(lcd_t *l, int x, int y, int down, uint32_t c)
 #define BAR_MAX 6
 
 /* Share bar: one segment per client in its colour (largest BAR_MAX, the rest grey), no text on it. */
+/* Bar version of a client colour: lifted to a minimum luminance, same hue. On the real panel
+ * the raw dark blues/purples make the dark bar text unreadable. */
+static uint32_t bar_color(uint32_t c)
+{
+	int r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255, lum = (r * 299 + g * 587 + b * 114) / 1000;
+	if (lum <= 0 || lum >= 150) return c;
+	r = r * 150 / lum; g = g * 150 / lum; b = b * 150 / lum;
+	return RGB(r > 255 ? 255 : r, g > 255 ? 255 : g, b > 255 ? 255 : b);
+}
+
 static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int y, int w, int h, int dir, int showval)
 {
 	int idx[MAX_CL], n = traffic_rank_m(t, mode, idx), k = 0;
@@ -786,11 +796,11 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 	for (int i = 0; i < n; i++) {
 		double v = client_val(&t->c[idx[i]], mode);
 		if (v <= 0) continue;
-		if (k < BAR_MAX) { vals[k] = v; cols[k] = PALETTE[t->c[idx[i]].color]; k++; }
+		if (k < BAR_MAX) { vals[k] = v; cols[k] = bar_color(PALETTE[t->c[idx[i]].color]); k++; }
 		else others += v;
 		tot += v;
 	}
-	if (others > 0) { vals[k] = others; cols[k] = C_OTHER; k++; }
+	if (others > 0) { vals[k] = others; cols[k] = bar_color(C_OTHER); k++; }
 	lcd_rrect(l, x, y, w, h, 3, C_TRACK);
 	double acc = 0;
 	for (int i = 0; i < k && tot > 0; i++) {
@@ -845,7 +855,7 @@ static void draw_donut(lcd_t *l, const traffic_t *t, int cx, int cy, int ro)
 		if (v <= 0) continue;
 		int slot = i < shown ? i : BAR_MAX;
 		vals[slot] += v;
-		cols[slot] = slot == BAR_MAX ? C_OTHER : PALETTE[t->c[idx[i]].color];
+		cols[slot] = slot == BAR_MAX ? bar_color(C_OTHER) : bar_color(PALETTE[t->c[idx[i]].color]);
 		tot += v;
 	}
 	for (int y = cy - ro; y <= cy + ro; y++)
@@ -1231,7 +1241,15 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 		copy(lab, sizeof(lab), generic ? (v[i].wifi ? "WiFi" : "Eth") : v[i].label);
 		if (split && v[i].pct >= 0) snprintf(lab + strlen(lab), sizeof(lab) - strlen(lab), " %d%%", v[i].pct);
 		if (layout) {
-			int ry = y + i * rowh, cx = sp.x0 + size / 2;
+			int ry = y + i * rowh;
+			const font_t *lf = size >= 24 ? &FONT_T16B : &FONT_T12, *lf2 = lf;
+			if (!noname) {
+				lf2 = ((int)strlen(lab) * lf->w > sp.x1 - sp.x0 - (noicon ? 0 : size + 6) && lf != &FONT_T12) ? &FONT_T12 : lf;   /* shrink before truncating */
+				ellipsize(lf2, lab, sp.x1 - sp.x0 - (noicon ? 0 : size + 6), 0, out, sizeof(out));
+			}
+			/* the icon+label group is centred in the row (label alone / icon alone likewise) */
+			int gw = (noicon ? 0 : size) + (noname ? 0 : (noicon ? 0 : 6) + lcd_text_w(lf2, out, 1));
+			int gx = (sp.x0 + sp.x1 + 1 - gw) / 2, cx = gx + size / 2;
 			if (!noicon) {
 				if (v[i].wifi) draw_fan(l, cx, ry + size, fs, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
 				else draw_port(l, cx, ry, size, col);
@@ -1239,13 +1257,9 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 					for (int k = -size / 3; k <= size / 3; k++) lcd_fill(l, cx + k, ry + size / 2 - k, 2, 2, col);
 			}
 			if (!noname) {
-				const font_t *lf = size >= 24 ? &FONT_T16B : &FONT_T12;
-				int lx = noicon ? sp.x0 : sp.x0 + size + 6;
-				const font_t *lf2 = ((int)strlen(lab) * lf->w > sp.x1 - lx && lf != &FONT_T12) ? &FONT_T12 : lf;   /* shrink before truncating */
-				ellipsize(lf2, lab, sp.x1 - lx, 0, out, sizeof(out));
 				/* the fan sits low in its row (dot at the bottom): centre the label on it, not on the row */
 				int lyy = !noicon && v[i].wifi ? ry + size - (fs + fs / 8) / 2 - lf2->h / 2 : ry + (rowh - lf2->h) / 2;
-				lcd_draw(l, lf2, lx, lyy, out, col, LCD_TRANSPARENT, 1);
+				lcd_draw(l, lf2, gx + (noicon ? 0 : size + 6), lyy, out, col, LCD_TRANSPARENT, 1);
 			}
 		} else {
 			int cw = (sp.x1 - sp.x0 + 1) / n, cx = sp.x0 + cw * i + cw / 2;
@@ -1265,17 +1279,21 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 	/* observed split: down line over up line, 1 px each, segments in the uplink colours */
 	double dt = 0, ut = 0;
 	for (int i = 0; i < n; i++) { dt += v[i].down; ut += v[i].up; }
-	int wdt = sp.x1 - sp.x0 + 1, ly = y + (layout ? n : 1) * rowh + 3;
+	int lx0 = sp.x0 + 8, wdt = sp.x1 - lx0 + 1, ly = y + (layout ? n : 1) * rowh + 3;
 	if (noname && noicon) ly = y + 1;
-	for (int line = 0; line < 2; line++) {
+	for (int line = 0; line < 2; line++) {          /* down line over up line, marked at the left */
 		double tot = line ? ut : dt, acc = 0;
-		lcd_fill(l, sp.x0, ly + line * 3, wdt, 1, C_TRACK);
+		for (int j = 0; j < 3; j++) {
+			int bw = line ? 2 + j * 2 : 5 - j * 2;
+			lcd_fill(l, sp.x0 + (5 - bw) / 2, ly + line * 3 - 1 + j, bw, 1, C_DIM);
+		}
+		lcd_fill(l, lx0, ly + line * 3, wdt, 1, C_TRACK);
 		for (int i = 0; i < n && tot > 0; i++) {
 			double val = line ? v[i].up : v[i].down;
-			int x0 = sp.x0 + (int)(acc / tot * wdt + 0.5);
+			int x0 = lx0 + (int)(acc / tot * wdt + 0.5);
 			acc += val;
-			int x1 = sp.x0 + (int)(acc / tot * wdt + 0.5);
-			if (x1 > x0) lcd_fill(l, x0, ly + line * 3, x1 - x0, 1, UPL_COLOR[i % UPL_COLORS]);
+			int x1 = lx0 + (int)(acc / tot * wdt + 0.5);
+			if (x1 > x0) lcd_fill(l, x0, ly + line * 3, x1 - x0, 1, upl_color(v[i].state));
 		}
 	}
 }
@@ -1676,8 +1694,8 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			if (gap < 2) gap = 2;
 			if (gap > 14) gap = 14;
 		}
-		/* fixed spacing: stack centred; auto: one gap at the top, the rest of the spare room below */
-		int y = sc->spacing >= 0 ? top + (spare - gap * (nvis - 1)) / 2 : top + gap;
+		/* stacks start at the top (auto leaves one gap above); spare room collects at the bottom */
+		int y = sc->spacing >= 0 ? top : top + gap;
 		if (y < top) y = top;
 		for (int i = 0; i < sc->nw; i++) {
 			if (!hs[i]) continue;
