@@ -18,7 +18,7 @@ No unit tests exist. A change is verified by building the package, installing it
 
 ## Router and safety
 
-Router: `ssh root@192.168.1.1` with the existing key; never ask for or print credentials. Verify reachability first, the address can change.
+Router: currently reachable as `ssh root@172.22.49.98` (ZeroTier; its own LAN is still 192.168.1.1) with the existing key; never ask for or print credentials. Verify reachability first, the address can change. No camera photos any more (the user moved devices); verify layouts by simulation (`tools/preview.sh`, `luci-preview` renders).
 Autonomous: read-only SSH, logs, source research, firmware download and offline extraction, writing code and docs on this computer, building packages, RAM-only runs under `/tmp` and `/var/run`.
 Ask first: package install or removal on the router, any persistent router configuration, flash/MTD writes, reboot, bootloader changes, kernel modules, GPIO/SPI/I2C pokes. The user's approval for one of these covers that action only.
 Run Ubiquiti binaries only through `package/utr-lcd/files/stock-run.sh` (own musl loader, `utr-lcd-fbshim.so` refusing `system()`/`popen()`, private ubus). Call the stock UI through `ui-call.sh`, which exposes state/info/userActivity/locate and nothing else.

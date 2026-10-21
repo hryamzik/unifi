@@ -26,7 +26,8 @@ var TYPES = {
 	dbm:         { label: 'Signal strength',       group: 'general', sizes: [16, 24, 32], def: 32 },
 	bars:        { label: 'Signal (bars)',         group: 'general', sizes: [16, 24, 32], def: 24 },
 	sigbar:      { label: 'Signal (line bar)',     group: 'general', sizes: [12, 16, 24], def: 16 },
-	dot:         { label: 'Online status (dot)',   group: 'general', sizes: [16, 24, 32], def: 16 },
+	status:      { label: 'Online status',         group: 'general', sizes: [16, 24, 32], def: 16 },
+	fan:         { label: 'Signal (Wi-Fi fan)',    group: 'general', sizes: [24, 32, 48], def: 32 },
 	clients:     { label: 'Client count',          group: 'general', sizes: [16, 24, 32], def: 24 },
 	wanip:       { label: 'WAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
 	lanip:       { label: 'LAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
@@ -48,11 +49,11 @@ var TYPES = {
 };
 
 var DEFAULT_SCREENS = [
-	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
-	  widgets: [ ['ssid', 24], ['bars', 24, true], ['dbm', 16], ['clients', 24] ] },
-	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
+	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, backfill: false,
+	  widgets: [ ['bars', 24], ['ssid', 24], ['dbm', 32], ['rule', 2], ['status', 16, true], ['clients', 24] ] },
+	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, backfill: true,
 	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
-	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
+	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, backfill: true,
 	  widgets: [ ['wanip', 16], ['lanip', 16], ['vpn', 16], ['uptime', 16], ['cpu', 16], ['ram', 16], ['flash', 16], ['temp', 16] ] }
 ];
 
@@ -70,9 +71,9 @@ function widgetHeight(type, size) {
 	}
 }
 
-/* Room for widgets below the status indicator. */
-function availableHeight(indicator) {
-	return 233 - (indicator === 'pill' ? 32 : indicator === 'none' ? 6 : 19);
+/* Room for widgets (content now starts at the top margin; the status is a widget). */
+function availableHeight() {
+	return 233 - 6;
 }
 
 /* Heights of the lines: widgets joined with the next one share a line (its height is the max). */
@@ -123,7 +124,7 @@ function flatten(main, screens) {
 	];
 	screens.forEach(function(s) {
 		out.push('screen=' + String(s.name).replace(/[\r\n]/g, ' '), 'dwell=' + s.dwell, 'spacing=' + (s.spacing || 'auto'), 'enabled=' + (s.enabled ? 1 : 0),
-			'indicator=' + s.indicator, 'backfill=' + (s.backfill ? 1 : 0));
+			'indicator=none', 'backfill=' + (s.backfill ? 1 : 0));
 		var line = [];
 		s.widgets.forEach(function(w, i) {
 			line.push(w[0] + ':' + w[1]);
@@ -214,14 +215,13 @@ return view.extend({
 			return {
 				name: s.name || _('Screen'), dwell: s.dwell || '8', enabled: bool(s.enabled, true),
 				spacing: (s.spacing === 'auto' || /^[0-9]+$/.test(s.spacing || '')) ? (s.spacing || 'auto') : 'auto',
-				indicator: [ 'dot', 'pill', 'none' ].indexOf(s.indicator) >= 0 ? s.indicator : 'dot',
 				backfill: bool(s.backfill, true),
 				widgets: list.reduce(function(acc, item) { return acc.concat(parseWidgetList(item)); }, [])
 			};
 		});
 		if (!screens.length)
 			screens = DEFAULT_SCREENS.map(function(s) {
-				return { name: s.name, dwell: s.dwell, spacing: s.spacing, enabled: s.enabled, indicator: s.indicator, backfill: s.backfill,
+				return { name: s.name, dwell: s.dwell, spacing: s.spacing, enabled: s.enabled, backfill: s.backfill,
 					widgets: s.widgets.map(function(w) { return w.slice(); }) };
 			});
 
@@ -311,7 +311,7 @@ return view.extend({
 		}
 
 		function screenCard(sc, si) {
-			var avail = availableHeight(sc.indicator), used = usedHeight(sc.widgets, sc.spacing), over = used > avail;
+			var avail = availableHeight(), used = usedHeight(sc.widgets, sc.spacing), over = used > avail;
 			var remaining = avail - used - (sc.widgets.length ? (sc.spacing && sc.spacing !== 'auto' ? +sc.spacing : GAP) : 0);
 
 			var addOptions = [ [ '', _('Add a widget...') ] ], groups = { general: _('General'), traffic: _('Traffic'), resources: _('Resources') };
@@ -351,7 +351,6 @@ return view.extend({
 						redraw();
 					}, 50), ' ', _('s on screen') ]),
 					check(sc.enabled, function(v) { sc.enabled = v; redraw(); }, _('In rotation')),
-					select([ [ 'dot', _('Status dot') ], [ 'pill', _('Status banner') ], [ 'none', _('No status') ] ], sc.indicator, function(v) { sc.indicator = v; redraw(); }),
 					select([ [ 'auto', _('Spacing: auto') ], [ '2', _('Spacing: 2 px') ], [ '4', _('Spacing: 4 px') ], [ '6', _('Spacing: 6 px') ], [ '8', _('Spacing: 8 px') ], [ '12', _('Spacing: 12 px') ], [ '18', _('Spacing: 18 px') ] ], sc.spacing, function(v) { sc.spacing = v; redraw(); }),
 					check(sc.backfill, function(v) { sc.backfill = v; redraw(); }, _('Signal background')),
 					btn('\u2191', function() { move(screens, si, -1); redraw(); }, si === 0, _('Move screen up')),
@@ -425,7 +424,7 @@ return view.extend({
 			globals, container,
 			E('div', {}, btn(_('Add screen'), function() {
 				if (screens.length >= 12) return;
-				screens.push({ name: _('Screen') + ' ' + (screens.length + 1), dwell: '8', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true, widgets: [] });
+				screens.push({ name: _('Screen') + ' ' + (screens.length + 1), dwell: '8', spacing: 'auto', enabled: true, backfill: true, widgets: [] });
 				redraw();
 			}, false))
 		]);
@@ -460,7 +459,7 @@ return view.extend({
 			uci.set('utr-lcd', sid, 'dwell', s.dwell);
 			uci.set('utr-lcd', sid, 'spacing', s.spacing || 'auto');
 			uci.set('utr-lcd', sid, 'enabled', s.enabled ? '1' : '0');
-			uci.set('utr-lcd', sid, 'indicator', s.indicator);
+			uci.set('utr-lcd', sid, 'indicator', 'none');
 			uci.set('utr-lcd', sid, 'backfill', s.backfill ? '1' : '0');
 			var wlist = [], line = [];
 			s.widgets.forEach(function(w, i) {
