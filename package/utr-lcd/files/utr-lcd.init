@@ -31,7 +31,7 @@ screen_widget() {
 }
 
 screen_section() {
-	local name dwell enabled indicator backfill spacing
+	local name dwell enabled indicator backfill spacing debug
 	SCREEN_NO=$((SCREEN_NO + 1))
 	SCREEN_SHOWN=0
 	config_get_bool enabled "$1" enabled 1
@@ -48,12 +48,14 @@ screen_section() {
 	config_get indicator "$1" indicator none
 	config_get_bool backfill "$1" backfill 1
 	config_get spacing   "$1" spacing auto
+	config_get_bool debug "$1" debug 0
 	printf 'screen=%s\n' "$(echo "$name" | head -n 1)"
 	echo "dwell=$dwell"
 	echo "spacing=$spacing"
 	echo "enabled=$enabled"
 	echo "indicator=$indicator"
 	echo "backfill=$backfill"
+	echo "debug=$debug"
 	config_list_foreach "$1" widget screen_widget
 }
 
