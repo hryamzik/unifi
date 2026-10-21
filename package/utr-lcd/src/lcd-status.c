@@ -851,12 +851,14 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 			lcd_fill(l, x + 3 + (tw2 - bw) / 2, y + (h - th) / 2 + j, bw, 1, RGB(10, 12, 16));
 		}
 	}
-	if (showval && t->valid && h >= 12) {          /* the direction's total speed, dark on the segments */
+	if (showval && t->valid && h >= 12) {          /* the direction's total speed, dark on the segments;
+	                                                 * same text as the total bars (T16B from 20 px up) */
 		char num[16], val[24];
 		const char *unit;
+		const font_t *f = h >= 20 ? &FONT_T16B : &FONT_T12;
 		fmt_rate(dir ? t->down : t->up, num, sizeof(num), &unit);
 		snprintf(val, sizeof(val), "%s %s", num, unit);
-		draw_halo(l, &FONT_T12, x + 15, y + (h - FONT_T12.h) / 2, val, RGB(10, 12, 16));
+		draw_halo(l, f, x + 15, y + (h - f->h) / 2, val, RGB(10, 12, 16));
 	}
 }
 
