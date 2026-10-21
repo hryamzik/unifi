@@ -5,7 +5,7 @@
 
 Several inputs are placed side by side (one screen each).
 
-Rotates into the viewing orientation and, unless --no-bezel, greys out what the bezel hides
+Rotates into the viewing orientation and, unless --no-bezel, makes what the bezel hides transparent
 (measured window, see docs/decisions.md): raw x 1..130, y 3..237 visible, corners rounded r=31.
 """
 import struct, sys, zlib
@@ -40,7 +40,8 @@ def load(src):
         for y in range(h):
             for x in range(w):
                 if not visible(x, y):
-                    img[y][x] = (26, 26, 30)   # flat neutral bezel, no coloured frame
+                    img[y][x] = (0, 0, 0, 0)   # bezel-hidden: transparent, no frame
+    img = [[p + (255,) if len(p) == 3 else p for p in row] for row in img]
     if rot == 180:
         img = [row[::-1] for row in img[::-1]]
     return w, h, img
@@ -52,7 +53,7 @@ h = shots[0][1]
 img = [[] for _ in range(h)]
 for i, (sw, sh, simg) in enumerate(shots):
     for y in range(h):
-        img[y] += ([(40, 40, 46)] * 6 if i else []) + simg[y]
+        img[y] += ([(0, 0, 0, 0)] * 6 if i else []) + simg[y]
 
 rows = []
 for row in img:
@@ -65,6 +66,6 @@ def chunk(t, c):
     return struct.pack(">I", len(c)) + t + c + struct.pack(">I", zlib.crc32(t + c) & 0xFFFFFFFF)
 
 
-open(dst, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+open(dst, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 6, 0, 0, 0))
                       + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b""))
 print(f"wrote {dst} {W}x{H}")

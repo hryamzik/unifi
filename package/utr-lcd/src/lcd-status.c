@@ -339,7 +339,7 @@ static void res_sample(res_t *r, cpu_prev_t *cp)
 
 /* ---------------------------------------------------------------------------------- configuration */
 
-enum { W_SSID, W_DBM, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
+enum { W_SSID, W_DBM, W_BARS, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
        W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
        W_CPU, W_RAM, W_FLASH, W_TEMP, W_MULTIWAN, W_NTYPES };
 enum { ST_DOT, ST_PILL, ST_NONE };
@@ -348,6 +348,7 @@ typedef struct { const char *name; int def_size; } wtype_t;
 static const wtype_t WTYPES[W_NTYPES] = {
 	[W_SSID]    = { "ssid", 24 },
 	[W_DBM]     = { "dbm", 32 },
+	[W_BARS]    = { "bars", 24 },           /* Wi-Fi signal as 5 ascending bars (Wi-Fi only); size = tallest bar */
 	[W_CLIENTS] = { "clients", 24 },
 	[W_WANIP]   = { "wanip", 16 },
 	[W_LANIP]   = { "lanip", 16 },
@@ -376,6 +377,7 @@ typedef struct { int type, size; } widget_t;
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill;
+	int spacing;                       /* gap between widgets in px; -1 = auto (spread, capped) */
 	widget_t w[MAX_WIDGETS];
 	int nw;
 } screen_t;
@@ -408,7 +410,7 @@ static void conf_line(config_t *c, char *line)
 		s = &c->s[c->ns++];
 		memset(s, 0, sizeof(*s));
 		copy(s->name, sizeof(s->name), eq);
-		s->dwell_ms = 8000; s->enabled = 1; s->indicator = ST_DOT; s->backfill = 1;
+		s->dwell_ms = 8000; s->enabled = 1; s->indicator = ST_DOT; s->backfill = 1; s->spacing = -1;
 	} else if (!s) {
 		if (!strcmp(line, "mode")) c->pinned = !strcmp(eq, "pin");
 		else if (!strcmp(line, "pin")) c->pin = atoi(eq);
@@ -423,6 +425,10 @@ static void conf_line(config_t *c, char *line)
 		int ms = (int)(atof(eq) * 1000);
 		s->dwell_ms = ms < 500 ? 500 : ms > 3600000 ? 3600000 : ms;       /* 0.5 s .. 1 h */
 	} else if (!strcmp(line, "enabled")) s->enabled = atoi(eq) != 0;
+	else if (!strcmp(line, "spacing")) {
+		s->spacing = !strcmp(eq, "auto") ? -1 : atoi(eq);
+		if (s->spacing > 30) s->spacing = 30;
+	}
 	else if (!strcmp(line, "indicator")) s->indicator = !strcmp(eq, "pill") ? ST_PILL : !strcmp(eq, "none") ? ST_NONE : ST_DOT;
 	else if (!strcmp(line, "backfill")) s->backfill = atoi(eq) != 0;
 	else if (!strcmp(line, "widget") && s->nw < MAX_WIDGETS) {
@@ -852,6 +858,8 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 		int wifi = c->s->has_signal && !strcmp(c->s->up_type, "wifi");
 		return !strcmp(c->s->up_state, "up") && (wifi || c->s->speed > 0) ? wd->size + PAD : 0;
 	}
+	case W_BARS:
+		return !strcmp(c->s->up_state, "up") && c->s->has_signal && !strcmp(c->s->up_type, "wifi") ? wd->size + PAD : 0;
 	case W_WANIP: return c->s->wan_ip[0] ? wd->size + PAD : 0;
 	case W_LANIP: return c->s->lan_ip[0] ? wd->size + PAD : 0;
 	case W_VPN: return strcmp(c->s->vpn_state, "none") && c->s->vpn_state[0] ? wd->size + PAD : 0;
@@ -889,6 +897,15 @@ static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, 
 			text_centered(l, w, sp, y, h, wd->size, buf, C_WHITE, 0);
 		}
 		break;
+	case W_BARS: {
+		/* 5 ascending bars, lit by signal quality (same scale as the backfill) */
+		int p = sig_pct(s->signal), nb = 5, lit = p <= 0 ? 0 : (p * nb + 99) / 100;
+		uint32_t col = c->backfill ? C_WHITE : p >= 50 ? C_OK : p >= 25 ? C_WARN : C_BAD;
+		int bw = wd->size >= 24 ? 6 : 4, bg = 3, bx = w->cx - (nb * bw + (nb - 1) * bg) / 2, base = y + (h + wd->size) / 2;
+		for (int i = 0; i < nb; i++)
+			lcd_fill(l, bx + i * (bw + bg), base - wd->size * (i + 1) / nb, bw, wd->size * (i + 1) / nb, i < lit ? col : C_TRACK);
+		break;
+	}
 	case W_CLIENTS: {
 		const font_t *f = LADDER[ladder_index(wd->size)];
 		int sc = wd->size >= 32 ? 2 : 1, iw = 16 * sc;
@@ -994,9 +1011,15 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 		if (hs[i] && (t == W_WANIP || t == W_LANIP || t == W_VPN || t == W_UPTIME || t == W_USAGE)) widget_draw(NULL, w, &sc->w[i], &c, top, hs[i]);
 	}
 	if (nvis) {
-		int spare = bottom - top - total, gap = nvis > 1 ? spare / (nvis + 1) : spare / 2;
-		if (gap < 2) gap = 2;
-		if (gap > 14) gap = 14;
+		int spare = bottom - top - total, gap;
+		if (sc->spacing >= 0) {          /* fixed gap, the stack stays vertically centred */
+			gap = sc->spacing;
+			if (nvis > 1 && gap * (nvis - 1) > spare) gap = spare > 0 ? spare / (nvis - 1) : 0;
+		} else {                         /* auto: spread the spare room, at most 14 px between widgets */
+			gap = nvis > 1 ? spare / (nvis + 1) : spare / 2;
+			if (gap < 2) gap = 2;
+			if (gap > 14) gap = 14;
+		}
 		int y = top + (spare - gap * (nvis - 1)) / 2;
 		if (y < top) y = top;
 		for (int i = 0; i < sc->nw; i++) {
@@ -1008,9 +1031,10 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 	lcd_flush(l);
 }
 
-/* Print the picture as the viewer sees it, bezel-hidden pixels in a flat neutral dark grey (the
- * rounded panel silhouette without a coloured frame), as run-length text for the LuCI preview:
- * "W H" then "count:rrggbb" runs in row-major order, all on one line each. */
+/* Print the picture as the viewer sees it, as run-length text for the LuCI preview:
+ * "W H" then "count:rrggbb" runs in row-major order, all on one line each. Bezel-hidden pixels
+ * are the sentinel ff00ff, which consumers (LuCI canvas, rle2png.py) render transparent, so the
+ * rounded panel sits directly on the page background with no frame at all. */
 static void write_rle(lcd_t *l, const win_t *w)
 {
 	printf("%d %d\n", l->w, l->h);
@@ -1025,7 +1049,7 @@ static void write_rle(lcd_t *l, const win_t *w)
 				int ci = corner_inset(w, y);
 				if (x < w->x0 + ci || x > w->x1 - ci) in = 0;
 			}
-			if (!in) c = RGB(26, 26, 30);
+			if (!in) c = RGB(255, 0, 255);
 			if (run && c == cur) { run++; continue; }
 			if (run) printf("%d:%06x ", run, (unsigned)cur);
 			cur = c; run = 1;
@@ -1080,6 +1104,11 @@ int main(int argc, char **argv)
 
 	config_t cf;
 	conf_load(&cf, conf);
+	/* The config file is rewritten (atomically) on every service reload, but procd does not
+	 * restart this process for it - the command line does not change - so watch the file and
+	 * pick up new layouts live. */
+	struct stat cst;
+	long long conf_key = stat(conf, &cst) == 0 ? (long long)cst.st_mtime * 1000000000LL + cst.st_mtim.tv_nsec : -1;
 	if (list) {
 		for (int i = 0; i < cf.ns; i++) printf("%d %d %d %s\n", i + 1, cf.s[i].enabled, cf.s[i].dwell_ms, cf.s[i].name);
 		return 0;
@@ -1131,7 +1160,19 @@ int main(int argc, char **argv)
 		}
 		if (!have_data && !coll.p && now >= next_collect + 10000) next_collect = now;   /* collector failed to start */
 
-		if (now - bl_checked >= 500) { dark = backlight_off(); bl_checked = now; }
+		if (now - bl_checked >= 500) {
+			dark = backlight_off(); bl_checked = now;
+			if (!once && stat(conf, &cst) == 0) {
+				long long k = (long long)cst.st_mtime * 1000000000LL + cst.st_mtim.tv_nsec;
+				if (k != conf_key) {
+					config_t nc;
+					conf_load(&nc, conf);
+					cf = nc; conf_key = k;
+					norder = build_order(&cf, order); pos = 0; drawn_pos = -1; prev[0] = 0; switch_at = now;
+					if (trace) fprintf(stderr, "%ld config reloaded, %d screens\n", now, cf.ns);
+				}
+			}
+		}
 
 		/* screen rotation */
 		if (drawn_pos < 0 || dark) switch_at = now + cf.s[order[pos]].dwell_ms;

@@ -19,7 +19,7 @@ def dec(path):
     px = []
     for t in lines[1].split():
         n, c = t.split(":")
-        px += [bytes.fromhex(c)] * int(n)
+        px += [b"\x00\x00\x00\x00" if c == "ff00ff" else bytes.fromhex(c) + b"\xff"] * int(n)   # ff00ff = bezel-hidden, transparent
     assert len(px) == w * h, (len(px), w * h)
     return w, h, px
 
@@ -33,7 +33,7 @@ for y in range(imgs[0][1]):
     for k, (w, h, px) in enumerate(imgs):
         line += b"".join(px[y * w + x] * scale for x in range(w))
         if k < len(imgs) - 1:
-            line += b"\x20\x20\x20" * 6 * scale
+            line += b"\x00\x00\x00\x00" * 6 * scale
     rows += [b"\x00" + line] * scale
 
 
@@ -41,6 +41,6 @@ def ch(t, c):
     return struct.pack(">I", len(c)) + t + c + struct.pack(">I", zlib.crc32(t + c) & 0xFFFFFFFF)
 
 
-open(out, "wb").write(b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+open(out, "wb").write(b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 6, 0, 0, 0))
                       + ch(b"IDAT", zlib.compress(b"".join(rows))) + ch(b"IEND", b""))
 print("wrote", out)
