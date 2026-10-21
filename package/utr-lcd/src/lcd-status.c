@@ -944,18 +944,22 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 			if (room > (name_len < 12 ? 12 : name_len) * nf->w) room = (name_len < 12 ? 12 : name_len) * nf->w;
 			if (room < 24) nm[0] = 0;                 /* no room for even a short name: chip and value only */
 			else ellipsize(nf, c->name, room, 0, nm, sizeof(nm));
+			int bw = 0;
 			if (hasbg && bgmax > 0) {                 /* background bar: this client's share of the widest */
-				int bw = (sp.x1 + 1 - sp.x0) * (int)(client_val(c, bgmode) * 100 / bgmax) / 100;
+				bw = (sp.x1 + 1 - sp.x0) * (int)(client_val(c, bgmode) * 100 / bgmax) / 100;
 				if (bw > 0) lcd_fill(l, sp.x0, y, bw, pitch - 1, dim_color(bar_color(PALETTE[c->color]), 65));
 			}
+			/* text that sits on the bright bar turns dark, like the values on the direction bars */
+			uint32_t namecol = bw > 12 + lcd_text_w(nf, nm, 1) / 2 ? RGB(10, 12, 16) : C_WHITE;
+			uint32_t valcol = bw > sp.x1 - sp.x0 - vw - 2 ? RGB(10, 12, 16) : C_DIM;
 			if ((bg == 3 || bg == 4 || bg == 5) && c->has_signal) {   /* signal: 1 px line, length and colour = quality */
 				int sq = sig_pct(c->signal);
 				lcd_fill(l, sp.x0, y + pitch - 2, (sp.x1 + 1 - sp.x0) * sq / 100, 1, sq >= 66 ? C_OK : sq >= 33 ? C_WARN : C_BAD);
 			}
 			int cs = step >= 2 ? 6 : 8;
 			lcd_rrect(l, sp.x0, y + (pitch - cs) / 2, cs, cs, 2, PALETTE[c->color]);
-			lcd_draw(l, nf, sp.x0 + 12, y + (pitch - nf->h) / 2, nm, C_WHITE, LCD_TRANSPARENT, 1);
-			lcd_draw(l, vf, sp.x1 + 1 - vw, y + (pitch - vf->h) / 2, val, C_DIM, LCD_TRANSPARENT, 1);
+			lcd_draw(l, nf, sp.x0 + 12, y + (pitch - nf->h) / 2, nm, namecol, LCD_TRANSPARENT, 1);
+			lcd_draw(l, vf, sp.x1 + 1 - vw, y + (pitch - vf->h) / 2, val, valcol, LCD_TRANSPARENT, 1);
 		} else {
 			double sum = 0;
 			for (int j = named; j < n; j++) sum += by_total ? t->c[idx[j]].total : t->c[idx[j]].rate;
