@@ -14,7 +14,7 @@
  * few px at the sides and rounds the corners with ~31 px radius) and for off-axis viewing: black
  * background, large bold text, every state spelled out in words (never colour alone).
  *
- * Usage: utr-lcd-status [-c collector] [-C screens.conf] [-T traffic] [-i seconds] [-0] [-1 [-N screen]] [-l]
+ * Usage: utr-lcd-status [-c collector] [-C screens.conf] [-T traffic] [-i seconds] [-0] [-1 [-N screen]] [-P] [-l]
  *   -c  collector command   (default /usr/libexec/utr-lcd/collect.sh)
  *   -C  screen layout file  (default /var/run/utr-lcd/screens.conf)
  *   -T  traffic file        (default /var/run/utr-lcd/traffic, written by traffic.sh)
@@ -22,6 +22,7 @@
  *   -0  do not rotate 180 degrees (default rotates; the panel is mounted upside-down)
  *   -1  draw once, hold, exit (for testing; hold time is LCD_ONCE_HOLD seconds)
  *   -N  with -1: which screen to draw (1-based, default 1)
+ *   -P  headless preview: like -1 but nothing is shown; prints the screen as run-length text on stdout (LuCI)
  *   -l  list the configured screens (number, enabled, dwell, name) and exit
  * Env: LCD_TRACE=1 prints a line (ms, screen number) to stderr whenever a screen is drawn.
  */
@@ -1001,6 +1002,34 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 	lcd_flush(l);
 }
 
+/* Print the picture as the viewer sees it, bezel-hidden pixels tinted, as run-length text for the LuCI
+ * preview: "W H" then "count:rrggbb" runs in row-major order, all on one line each. */
+static void write_rle(lcd_t *l, const win_t *w)
+{
+	printf("%d %d\n", l->w, l->h);
+	uint32_t cur = 0;
+	int run = 0;
+	for (int y = 0; y < l->h; y++)
+		for (int x = 0; x < l->w; x++) {
+			int px = l->flip_x ? l->phys_w - 1 - x : x, py = l->flip_y ? l->phys_h - 1 - y : y;
+			uint32_t c = l->px[py * l->pitch + px];
+			int in = x >= w->x0 && x <= w->x1 && y >= w->y0 && y <= w->y1;
+			if (in) {                              /* rounded corners */
+				int ci = corner_inset(w, y);
+				if (x < w->x0 + ci || x > w->x1 - ci) in = 0;
+			}
+			if (!in) {
+				int r = c >> 16 & 255, g = c >> 8 & 255, b = c & 255;
+				c = (r || g || b) ? RGB(90 + r / 8, 20 + g / 8, 20 + b / 8) : RGB(70, 70, 78);
+			}
+			if (run && c == cur) { run++; continue; }
+			if (run) printf("%d:%06x ", run, (unsigned)cur);
+			cur = c; run = 1;
+		}
+	if (run) printf("%d:%06x", run, (unsigned)cur);
+	printf("\n");
+}
+
 static int screen_uses_traffic(const screen_t *sc)
 {
 	for (int i = 0; i < sc->nw; i++)
@@ -1027,7 +1056,7 @@ static int backlight_off(void)
 int main(int argc, char **argv)
 {
 	const char *cmd = "/usr/libexec/utr-lcd/collect.sh", *conf = "/var/run/utr-lcd/screens.conf", *tfile = "/var/run/utr-lcd/traffic";
-	int interval = 5, rotate = 1, once = 0, once_screen = 1, list = 0;
+	int interval = 5, rotate = 1, once = 0, once_screen = 1, list = 0, headless = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-c") && i + 1 < argc) cmd = argv[++i];
 		else if (!strcmp(argv[i], "-C") && i + 1 < argc) conf = argv[++i];
@@ -1037,8 +1066,9 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "-0")) rotate = 0;
 		else if (!strcmp(argv[i], "-1")) once = 1;
 		else if (!strcmp(argv[i], "-l")) list = 1;
+		else if (!strcmp(argv[i], "-P")) headless = once = 1;
 		else {
-			fprintf(stderr, "usage: %s [-c collector] [-C screens.conf] [-T traffic] [-i sec] [-0] [-1 [-N screen]] [-l]\n", argv[0]);
+			fprintf(stderr, "usage: %s [-c collector] [-C screens.conf] [-T traffic] [-i sec] [-0] [-1 [-N screen]] [-P] [-l]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -1058,7 +1088,7 @@ int main(int argc, char **argv)
 	sigaction(SIGINT, &sa, NULL);
 
 	lcd_t l;
-	if (lcd_open(&l, "/dev/dri/card0", rotate, rotate)) return 1;
+	if (headless ? lcd_open_mem(&l, rotate, rotate) : lcd_open(&l, "/dev/dri/card0", rotate, rotate)) return 1;
 
 	/*
 	 * Visible window of the glass, measured with a calibration grid photographed straight on (see
@@ -1093,6 +1123,7 @@ int main(int argc, char **argv)
 			next_collect = now_ms() + interval * 1000L;
 			int up = !strcmp(st.up_state, "up");
 			fails = (up && !strcmp(st.inet, "fail")) ? fails + 1 : 0;
+			if (once && fails) fails = 2;           /* single shot (previews): one failed probe is enough */
 		}
 		if (!have_data && !coll.p && now >= next_collect + 10000) next_collect = now;   /* collector failed to start */
 
@@ -1133,7 +1164,11 @@ int main(int argc, char **argv)
 				drawn_pos = pos;
 				copy(prev, sizeof(prev), sig);
 			}
-			if (once && have_data) { sleep(LCD_ONCE_HOLD); break; }
+			if (once && have_data) {
+				if (headless) write_rle(&l, &w);
+				else sleep(LCD_ONCE_HOLD);
+				break;
+			}
 		}
 
 		long wait = 100;
@@ -1142,7 +1177,7 @@ int main(int argc, char **argv)
 		else { struct timespec ts = { 0, wait * 1000000L }; nanosleep(&ts, NULL); }
 	}
 
-	if (!once || LCD_ONCE_HOLD > 0) {      /* blank the panel on exit (not for zero-hold previews) */
+	if (!headless && (!once || LCD_ONCE_HOLD > 0)) {      /* blank the panel on exit (not for zero-hold previews) */
 		lcd_fill(&l, 0, 0, l.w, l.h, LCD_BLACK);
 		lcd_flush(&l);
 	}

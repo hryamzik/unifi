@@ -45,6 +45,7 @@ typedef struct {
 	int flip_x, flip_y;    /* mirror logical coords onto the glass */
 	int w, h;              /* logical size (== phys for now) */
 	int dirty_warned;
+	int mem_only;          /* no display: draw into memory only (previews) */
 } lcd_t;
 
 #ifndef LCD_MOCK
@@ -146,6 +147,19 @@ static int lcd_open(lcd_t *l, const char *dev, int flip_x, int flip_y)
 
 #endif
 
+/* Headless: a 136x240 buffer in memory, nothing is sent anywhere (lcd_flush does nothing). */
+static int lcd_open_mem(lcd_t *l, int flip_x, int flip_y)
+{
+	memset(l, 0, sizeof(*l));
+	l->phys_w = 136; l->phys_h = 240; l->pitch = 136;
+	l->size = (size_t)l->pitch * l->phys_h * 4;
+	l->px = calloc(1, l->size);
+	l->w = l->phys_w; l->h = l->phys_h;
+	l->flip_x = flip_x; l->flip_y = flip_y;
+	l->mem_only = 1;
+	return l->px ? 0 : -1;
+}
+
 static inline void lcd_pixel(lcd_t *l, int x, int y, uint32_t c)
 {
 	if (x < 0 || y < 0 || x >= l->w || y >= l->h) return;
@@ -224,6 +238,7 @@ static void lcd_disc(lcd_t *l, int cx, int cy, int r, uint32_t c)
 /* Push the buffer to the panel. Warns once on failure. */
 static void lcd_flush(lcd_t *l)
 {
+	if (l->mem_only) return;
 	struct drm_mode_fb_dirty_cmd d = { .fb_id = l->fb };
 	if (lcd__ioctl(l->fd, DRM_IOCTL_MODE_DIRTYFB, &d) && !l->dirty_warned) {
 		perror("lcd: dirtyfb");
@@ -233,6 +248,7 @@ static void lcd_flush(lcd_t *l)
 
 static void lcd_close(lcd_t *l)
 {
+	if (l->mem_only) { free(l->px); return; }
 	if (l->px && l->px != MAP_FAILED) munmap(l->px, l->size);
 	if (l->fd > 0) close(l->fd);
 }
@@ -240,6 +256,7 @@ static void lcd_close(lcd_t *l)
 #else
 static void lcd_flush(lcd_t *l)
 {
+	if (l->mem_only) return;
 	const char *out = getenv("LCD_MOCK_OUT");
 	FILE *f = out ? fopen(out, "wb") : NULL;
 	if (!f) return;
