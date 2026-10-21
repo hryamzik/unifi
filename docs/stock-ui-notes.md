@@ -69,7 +69,7 @@ connected. VPN type is Teleport, WireGuard or OpenVPN (label **Teleport** etc., 
 - `info`: `brightness`, `clients`, `meshLinkSpeed`, `meshSsid`, `meshStatus`, `meshUplinkInterface`, `nightModeBegins`, `nightModeEnds`, `pin`, `raiseToWake`, `screenTimeout`, `theme`, `usbName`, `vpnConnectionTime`, `vpnName`, `vpnStatus`, `vpnType`. Settings travel in `info`; there is no separate settings method. Partial payloads are fine.
 - `state{value}`, `userActivity{value}`, `locate{value}`, `upgrade{seconds}`, and `reset`, `restart`, `shutdown` (never exposed by `ui-call.sh`).
 - `ulcmd -d -c` logs every callback (`Data cb_Theme green`, `Settings: Saving: ...`); useful to debug. Settings are persisted to `/etc/ulcmd/ulcmd.conf` (the shim keeps it in RAM).
-- Screen timeout (verified): with `raiseToWake` true and `screenTimeout` N the backlight dims at about 75% of N, is off at N, and `userActivity` wakes it. Brightness defaults to 80 at start unless `info` carries `brightness`.
+- Screen timeout (verified, but not used by this package, see `power.sh` in `docs/decisions.md`): with `raiseToWake` true and `screenTimeout` N the backlight dims at about 75% of N, is off at N, and `userActivity` wakes it. Brightness defaults to 80 at start unless `info` carries `brightness`.
 - Wake source: the board has a LIS2DW12 accelerometer (`/sys/bus/iio/devices/iio:device0`, about 1000 raw per g, 1 Hz default sampling, Z near -1030 on the upside-down LR).
 
 ## Web sources

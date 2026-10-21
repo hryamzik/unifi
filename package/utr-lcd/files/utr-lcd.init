@@ -21,7 +21,7 @@ set_brightness() {
 }
 
 start_service() {
-	local enabled mode interval rotate brightness theme ox oy timeout wake rot_flag=""
+	local enabled mode interval rotate brightness theme ox oy dim_after dim_level off_after rot_flag=""
 
 	config_load utr-lcd
 	config_get_bool enabled main enabled 1
@@ -33,14 +33,17 @@ start_service() {
 	config_get theme      main theme blue
 	config_get ox         main offset_x 0
 	config_get oy         main offset_y 0
-	config_get timeout    main screen_timeout 0
-	config_get_bool wake  main wake_on_motion 1
+	config_get dim_after  main dim_after 0
+	config_get dim_level  main dim_level 15
+	config_get off_after  main screen_timeout 0
 
 	[ -e /dev/dri/card0 ] || { logger -t utr-lcd "no /dev/dri/card0 (LCD panel driver missing?)"; return 1; }
 	[ "$rotate" = 0 ] && rot_flag="-0"
 
 	mkdir -p "$RUN"
 	set_brightness "$brightness"
+	# a restart must never leave the panel dark (the power manager may have turned it off)
+	[ "$(cat $BL/brightness 2>/dev/null)" = 0 ] && cat "$BL/max_brightness" > "$BL/brightness" 2>/dev/null
 
 	[ "$mode" = auto ] && mode=stock
 	if [ "$mode" = stock ] && [ ! -x "$STOCK/bin/ulcmd" ]; then
@@ -74,24 +77,29 @@ start_service() {
 
 		procd_open_instance feed
 		procd_set_param command $LIBEXEC/feed.sh
-		procd_set_param env UTR_RUN=$RUN UTR_LIBEXEC=$LIBEXEC UTR_THEME=$theme UTR_INTERVAL=$interval UTR_BRIGHTNESS=$brightness UTR_TIMEOUT=$timeout
+		procd_set_param env UTR_RUN=$RUN UTR_LIBEXEC=$LIBEXEC UTR_THEME=$theme UTR_INTERVAL=$interval UTR_BRIGHTNESS=$brightness
 		procd_set_param stdout 1
 		procd_set_param stderr 1
 		procd_set_param respawn 3600 5 0
 		procd_close_instance
 
-		if [ "$timeout" -gt 0 ] 2>/dev/null && [ "$wake" -eq 1 ]; then
-			procd_open_instance wake
-			procd_set_param command $LIBEXEC/wake.sh
-			procd_set_param env UTR_LIBEXEC=$LIBEXEC
-			procd_set_param respawn 3600 5 0
-			procd_close_instance
-		fi
 	else
 		procd_open_instance native
 		procd_set_param command /usr/bin/utr-lcd-status -c $LIBEXEC/collect.sh -i "$interval" $rot_flag
 		procd_set_param stdout 1
 		procd_set_param stderr 1
+		procd_set_param respawn 3600 5 0
+		procd_close_instance
+	fi
+
+	# dim / blank on idle, wake on motion (both modes; only touches the backlight)
+	if [ "$dim_after" -gt 0 ] 2>/dev/null || [ "$off_after" -gt 0 ] 2>/dev/null; then
+		local full=$brightness
+		[ -n "$full" ] || { [ "$mode" = stock ] && full=80 || full=100; }   # the stock UI starts at 80
+		procd_open_instance power
+		procd_set_param command $LIBEXEC/power.sh
+		procd_set_param env UTR_RUN=$RUN UTR_FULL=$full UTR_DIM_AFTER=$dim_after \
+			UTR_DIM_LEVEL=$dim_level UTR_OFF_AFTER=$off_after
 		procd_set_param respawn 3600 5 0
 		procd_close_instance
 	fi

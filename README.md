@@ -68,8 +68,9 @@ from flash except the bundle itself (~7 MB in `/usr/share/utr-lcd/stock`).
 | `brightness` | empty | backlight percent 1-100; empty leaves it alone (stock mode otherwise starts at 80) |
 | `theme` | `blue` | stock mode: `blue aqua green pink yellow orange purple` |
 | `offset_x`, `offset_y` | `2`, `0` | stock mode: placement of the 135x240 image in the 136x240 panel (calibrated on the glass) |
-| `screen_timeout` | `0` | stock mode: blank the screen after this many seconds (20-300); `0` keeps it always on |
-| `wake_on_motion` | `1` | stock mode: with a timeout, wake the screen when the router is moved (accelerometer) |
+| `dim_after` | `0` | both modes: dim the backlight after this many seconds without motion; `0` never dims |
+| `dim_level` | `15` | backlight percent while dimmed |
+| `screen_timeout` | `0` | both modes: turn the backlight off after this many seconds without motion; `0` never turns it off. Moving the router restores full brightness |
 
 ## How it works
 

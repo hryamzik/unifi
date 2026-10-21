@@ -90,7 +90,7 @@ return view.extend({
 		o.default = '180';
 
 		o = s.option(form.Value, 'brightness', _('Brightness'),
-			_('Backlight in percent (1-100). Empty leaves it unchanged (the stock UniFi look starts at 80).'));
+			_('Backlight in percent (1-100) while the screen is active. Empty leaves it unchanged (the stock UniFi look starts at 80).'));
 		o.datatype = 'range(1,100)';
 		o.optional = true;
 		o.placeholder = '100';
@@ -116,19 +116,23 @@ return view.extend({
 		o.depends('mode', 'auto');
 		o.depends('mode', 'stock');
 
-		o = s.option(form.Value, 'screen_timeout', _('Screen timeout'),
-			_('Stock UniFi look only: blank the screen after this many seconds without activity (20-300). 0 keeps it always on.'));
-		o.datatype = 'or(0,range(20,300))';
+		o = s.option(form.Value, 'dim_after', _('Dim after'),
+			_('Seconds without motion before the backlight dims. 0 never dims. Moving the router restores it.'));
+		o.datatype = 'uinteger';
 		o.default = '0';
-		o.depends('mode', 'auto');
-		o.depends('mode', 'stock');
+		o.placeholder = '0';
 
-		o = s.option(form.Flag, 'wake_on_motion', _('Wake on motion'),
-			_('Stock UniFi look only: wake the screen when the router is moved (uses the built-in accelerometer).'));
-		o.default = o.enabled;
-		o.rmempty = false;
-		o.depends('mode', 'auto');
-		o.depends('mode', 'stock');
+		o = s.option(form.Value, 'dim_level', _('Dim level'), _('Backlight percent while dimmed.'));
+		o.datatype = 'range(1,100)';
+		o.default = '15';
+		o.placeholder = '15';
+		o.depends({ dim_after: '0', '!reverse': true });
+
+		o = s.option(form.Value, 'screen_timeout', _('Turn off after'),
+			_('Seconds without motion before the backlight turns off. 0 keeps the screen on (dimmed if enabled). Moving the router wakes it.'));
+		o.datatype = 'uinteger';
+		o.default = '0';
+		o.placeholder = '0';
 
 		var statusTable = E('table', { 'class': 'table' }, statusRows(status));
 
