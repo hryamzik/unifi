@@ -379,8 +379,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_PLAYLIST 32
 
 #define MAX_SUB 3
-typedef struct { int type, size, wrap; } wspec_t;
-typedef struct { int type, size, wrap; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
+typedef struct { int type, size, wrap, shrink; } wspec_t;
+typedef struct { int type, size, wrap, shrink; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill;
@@ -399,7 +399,7 @@ typedef struct {
 
 static const char DEFAULT_CONF[] =
 	"fill_dim=30\nfill_edge=1\n"
-	"screen=Status\ndwell=8\nbackfill=0\nwidget=status:16\nwidget=segbar:16\nwidget=dbm:32\nwidget=ssid:24w\n"
+	"screen=Status\ndwell=8\nbackfill=0\nwidget=status:16\nwidget=segbar:16\nwidget=dbm:32\nwidget=ssid:24ws\n"
 	"widget=clients:24\n"
 	"screen=Traffic\ndwell=8\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
 	"widget=usagebar:12\nwidget=legend:4\n"
@@ -453,6 +453,7 @@ static void conf_line(config_t *c, char *line)
 					specs[n].type = t;
 					specs[n].size = size > 0 ? size : WTYPES[t].def_size;
 					specs[n].wrap = colon && strchr(colon, 'w') ? 1 : 0;   /* e.g. ssid:24w wraps to 2 lines */
+					specs[n].shrink = colon && strchr(colon, 's') ? 1 : 0;   /* ssid:24ws: then step the font down until it fits */
 					n++;
 					break;
 				}
@@ -461,6 +462,7 @@ static void conf_line(config_t *c, char *line)
 			s->w[s->nw].type = specs[0].type;
 			s->w[s->nw].size = specs[0].size;
 			s->w[s->nw].wrap = specs[0].wrap;
+			s->w[s->nw].shrink = specs[0].shrink;
 			s->nw++;
 		} else if (n > 1) {
 			widget_t *wd = &s->w[s->nw++];
@@ -944,13 +946,53 @@ typedef struct { const status_t *s; const traffic_t *tr; const res_t *res; const
 #define PAD 2
 #define RULE_H 6
 
+/* Where a wrapped name breaks: after a '-' or ' ' in reach, hard break at the line width
+ * otherwise. Returns the number of characters on the first line. */
+static int ssid_break(const font_t *f, const char *s, int maxw)
+{
+	int maxc = maxw / f->w, len = (int)strlen(s);
+	if (maxc < 4) maxc = 4;
+	if (maxc > len) maxc = len;
+	for (int i = maxc; i > maxc / 2; i--)
+		if (s[i - 1] == '-' || s[i - 1] == ' ') return i;   /* break after the separator */
+	return maxc;
+}
+
+/* Lines (1 or 2) the name needs at f, or 0 when even two lines would have to be cut. */
+static int ssid_fit_lines(const font_t *f, const char *s, int maxw)
+{
+	if (lcd_text_w(f, s, 1) <= maxw) return 1;
+	const char *rest = s + ssid_break(f, s, maxw);
+	if (*rest == ' ') rest++;
+	return lcd_text_w(f, rest, 1) <= maxw ? 2 : 0;
+}
+
+/* Font for a wrapped name: at the chosen size, unless shrink is on and the name does not fit
+ * on two lines there - then step down the ladder until it does (smallest font: cut as before).
+ * Sets *lines to the lines the name takes at the returned font. */
+static const font_t *ssid_font(int size, const char *s, int maxw, int shrink, int *lines)
+{
+	int i = ladder_index(size);
+	if (!shrink) {
+		*lines = ssid_fit_lines(LADDER[i], s, maxw);
+		if (!*lines) *lines = 2;
+		return LADDER[i];
+	}
+	for (; i < NLADDER; i++) {
+		int n = ssid_fit_lines(LADDER[i], s, maxw);
+		if (n) { *lines = n; return LADDER[i]; }
+	}
+	*lines = 2;
+	return LADDER[NLADDER - 1];
+}
+
 /* Height a widget needs; 0 = nothing to show right now (it takes no room). */
 static int widget_h(const widget_t *wd, const ctx_t *c)
 {
 	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
 		int m = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink };
 			int hh = widget_h(&t, c);
 			if (hh > m) m = hh;
 		}
@@ -960,11 +1002,13 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	case W_STATUS: return wd->size + PAD;
 	case W_SSID: {
 		if (!wd->wrap) return wd->size + PAD;
-		/* wrapping: a second line only when the name at the chosen size is wider than a line */
+		/* wrapping: a second line only when the name at the chosen size is wider than a line;
+		 * with shrink the two lines may be set in a smaller font, and take less room */
 		const status_t *st = c->s;
 		const char *nm = strcmp(st->up_state, "up") ? "No uplink" : !strcmp(st->up_type, "wifi") ? (st->up_name[0] ? st->up_name : "Wi-Fi") : !strcmp(st->up_type, "usb") ? "USB WAN" : "Ethernet";
-		const font_t *f = LADDER[ladder_index(wd->size)];
-		return lcd_text_w(f, nm, 1) > 110 ? 2 * f->h + PAD : wd->size + PAD;
+		int lines;
+		const font_t *f = ssid_font(wd->size, nm, 110, wd->shrink, &lines);
+		return lines > 1 ? 2 * f->h + PAD : wd->size + PAD;
 	}
 	case W_DBM: {
 		int wifi = c->s->has_signal && !strcmp(c->s->up_type, "wifi");
@@ -991,22 +1035,18 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 
 static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, int y, int h);
 
-/* SSID with wrapping: at the chosen size, break to a second line (after a '-' or ' ' if
- * there is one in reach, hard break otherwise) instead of shrinking and cutting the name. */
-static void draw_ssid_wrapped(lcd_t *l, span_t sp, int y, int h, int size, const char *s, uint32_t c)
+/* SSID with wrapping: break to a second line (after a '-' or ' ' if there is one in reach,
+ * hard break otherwise) instead of cutting the name; with shrink, step the font down first
+ * when two lines at the chosen size would still have to be cut. */
+static void draw_ssid_wrapped(lcd_t *l, span_t sp, int y, int h, int size, const char *s, uint32_t c, int shrink)
 {
-	const font_t *f = LADDER[ladder_index(size)];
-	int maxw = sp.x1 - sp.x0 + 1, cx = (sp.x0 + sp.x1 + 1) / 2;
-	if (lcd_text_w(f, s, 1) <= maxw) {
+	int maxw = sp.x1 - sp.x0 + 1, cx = (sp.x0 + sp.x1 + 1) / 2, lines;
+	const font_t *f = ssid_font(size, s, maxw, shrink, &lines);
+	if (lines == 1) {
 		lcd_draw(l, f, cx - lcd_text_w(f, s, 1) / 2, y + (h - f->h) / 2, s, c, LCD_TRANSPARENT, 1);
 		return;
 	}
-	int maxc = maxw / f->w, len = (int)strlen(s), br = -1;
-	if (maxc < 4) maxc = 4;
-	if (maxc > len) maxc = len;
-	for (int i = maxc; i > maxc / 2; i--)
-		if (s[i - 1] == '-' || s[i - 1] == ' ') { br = i; break; }   /* break after the separator */
-	if (br < 0) br = maxc;
+	int br = ssid_break(f, s, maxw);
 	char l1[48], l2[48];
 	snprintf(l1, sizeof(l1), "%.*s", br, s);
 	const char *rest = s + br;
@@ -1027,12 +1067,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		/* visible members get equal cells of the span, each drawn centred in its cell */
 		int vis[MAX_SUB], nv = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink };
 			if (widget_h(&t, c)) vis[nv++] = i;
 		}
 		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
 		for (int k = 0; k < nv; k++) {
-			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap };
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink };
 			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
 			widget_draw_sp(l, w, &t, c, y, h, cell);
 		}
@@ -1042,7 +1082,7 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 	switch (wd->type) {
 	case W_SSID:
 		if (!up) text_centered(l, w, sp, y, h, wd->size, "No uplink", C_BAD, 0);
-		else if (wifi && wd->wrap && sp.x1 - sp.x0 + 1 >= 90) draw_ssid_wrapped(l, sp, y, h, wd->size, s->up_name[0] ? s->up_name : "Wi-Fi", C_WHITE);
+		else if (wifi && wd->wrap && sp.x1 - sp.x0 + 1 >= 90) draw_ssid_wrapped(l, sp, y, h, wd->size, s->up_name[0] ? s->up_name : "Wi-Fi", C_WHITE, wd->shrink);
 		else if (wifi) text_centered(l, w, sp, y, h, wd->size, s->up_name[0] ? s->up_name : "Wi-Fi", C_WHITE, 0);
 		else text_centered(l, w, sp, y, h, wd->size, !strcmp(s->up_type, "usb") ? "USB WAN" : "Ethernet", C_WHITE, 0);
 		break;
@@ -1243,7 +1283,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			for (int j = 0; j < sc->w[i].nsub; j++) {
 				int st = sc->w[i].sub[j].type;
 				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
-					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap };
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink };
 					widget_draw(NULL, w, &mt, &c, top, hs[i]);
 				}
 			}

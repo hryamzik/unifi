@@ -51,7 +51,7 @@ var TYPES = {
 
 var DEFAULT_SCREENS = [
 	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, backfill: false,
-	  widgets: [ ['status', 16], ['segbar', 16], ['dbm', 32], ['ssid', 24, false, true], ['clients', 24] ] },
+	  widgets: [ ['status', 16], ['segbar', 16], ['dbm', 32], ['ssid', 24, false, true, true], ['clients', 24] ] },
 	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, backfill: true,
 	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
 	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, backfill: true,
@@ -108,11 +108,11 @@ function parseWidget(str) {
 	if (!t) return null;
 	var size = parseInt(p[1], 10);
 	if (!size || (t.sizes && t.sizes.indexOf(size) < 0)) size = t.def;
-	return [p[0], size, false, /w/.test(p[1] || '')];   /* 4th: wrap to two lines (ssid:24w) */
+	return [p[0], size, false, /w/.test(p[1] || ''), /s/.test(p[1] || '')];   /* 4th: wrap to two lines (ssid:24w); 5th: shrink to fit (ssid:24ws) */
 }
 
 function widgetSpec(w) {
-	return w[0] + ':' + w[1] + (w[3] ? 'w' : '');
+	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '');
 }
 
 /* One config item: "type:size" or several joined by '+' for one shared line. */
@@ -308,6 +308,9 @@ return view.extend({
 				E('td', { 'style': 'text-align:center' }, w[0] === 'ssid' ? E('input', { 'type': 'checkbox', 'title': _('Wrap a long name to a second line instead of cutting it'),
 					'checked': w[3] ? '' : null,
 					'change': function() { w[3] = this.checked; redraw(); } }) : E('span', { 'style': 'opacity:.6' }, '-')),
+				E('td', { 'style': 'text-align:center' }, w[0] === 'ssid' ? E('input', { 'type': 'checkbox', 'title': _('If the name still does not fit (on two lines when wrapping), reduce the font size step by step until it does'),
+					'checked': w[4] ? '' : null,
+					'change': function() { w[4] = this.checked; redraw(); } }) : E('span', { 'style': 'opacity:.6' }, '-')),
 				E('td', {}, t.sizes ? select(t.sizes.map(function(s) { return [ s, sizeLabel(t, s) ]; }), w[1], function(v) {
 					w[1] = +v; redraw();
 				}) : E('span', { 'style': 'opacity:.6' }, '-')),
@@ -383,7 +386,7 @@ return view.extend({
 			if (!sc._folded) parts.push(E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start' }, [
 					E('div', { 'style': 'flex:1 1 300px; min-width:0' }, [
 						sc.widgets.length ? E('div', { 'style': 'overflow-x:auto' }, E('table', { 'class': 'table', 'style': 'width:100%' }, [
-							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Join next')), E('th', { 'class': 'th' }, _('Wrap')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
+							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Join next')), E('th', { 'class': 'th' }, _('Wrap')), E('th', { 'class': 'th' }, _('Shrink')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
 						].concat(sc.widgets.map(function(_w, wi) { return widgetRow(sc, wi); })))) : E('em', {}, _('Nothing on this screen yet.')),
 						E('div', { 'style': 'margin-top:8px' }, addSel),
 						meter,
