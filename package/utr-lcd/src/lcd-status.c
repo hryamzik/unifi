@@ -339,7 +339,7 @@ static void res_sample(res_t *r, cpu_prev_t *cp)
 
 /* ---------------------------------------------------------------------------------- configuration */
 
-enum { W_SSID, W_DBM, W_BARS, W_SIGBAR, W_FAN, W_STATUS, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
+enum { W_SSID, W_DBM, W_BARS, W_SIGBAR, W_FAN, W_SEGBAR, W_STATUS, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
        W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
        W_CPU, W_RAM, W_FLASH, W_TEMP, W_MULTIWAN, W_ROW, W_NTYPES };
 enum { ST_DOT, ST_PILL, ST_NONE };   /* legacy "indicator" config values, parsed but no longer drawn */
@@ -351,6 +351,7 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_BARS]    = { "bars", 24 },           /* Wi-Fi signal as 5 ascending bars (Wi-Fi only); size = tallest bar */
 	[W_SIGBAR]  = { "sigbar", 16 },         /* Wi-Fi signal as a resource-style line bar; size >= 24: tall bar, text on top */
 	[W_FAN]     = { "fan", 32 },            /* Wi-Fi signal as a fan icon (dot + arcs), Wi-Fi only */
+	[W_SEGBAR]  = { "segbar", 16 },         /* Wi-Fi signal as the stock-style segmented bar (10 segments), Wi-Fi only */
 	[W_STATUS]  = { "status", 16 },         /* online status globe (was "dot" in early configs) */
 	[W_ROW]     = { "row", 0 },             /* sub-widgets side by side on one line (a+b+c in the config) */
 	[W_CLIENTS] = { "clients", 24 },
@@ -398,7 +399,7 @@ typedef struct {
 
 static const char DEFAULT_CONF[] =
 	"fill_dim=30\nfill_edge=1\n"
-	"screen=Status\ndwell=8\nbackfill=0\nwidget=bars:24\nwidget=ssid:24\nwidget=dbm:32\nwidget=rule:2\n"
+	"screen=Status\ndwell=8\nbackfill=0\nwidget=segbar:16\nwidget=ssid:24\nwidget=dbm:32\nwidget=rule:2\n"
 	"widget=status:16+clients:24\n"
 	"screen=Traffic\ndwell=8\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
 	"widget=usagebar:12\nwidget=legend:4\n"
@@ -962,6 +963,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	case W_BARS:
 	case W_SIGBAR:
 	case W_FAN:
+	case W_SEGBAR:
 		return !strcmp(c->s->up_state, "up") && c->s->has_signal && !strcmp(c->s->up_type, "wifi") ? wd->size + PAD : 0;
 	case W_WANIP: return c->s->wan_ip[0] ? wd->size + PAD : 0;
 	case W_LANIP: return c->s->lan_ip[0] ? wd->size + PAD : 0;
@@ -1034,6 +1036,19 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		int p = sig_pct(s->signal);
 		uint32_t col = c->backfill ? C_WHITE : p >= 50 ? C_OK : p >= 25 ? C_WARN : C_BAD;
 		draw_fan(l, (sp.x0 + sp.x1 + 1) / 2, y + (h + wd->size) / 2, wd->size, p, col, C_TRACK, c->backfill);
+		break;
+	}
+	case W_SEGBAR: {
+		/* Stock-style segmented bar: 10 rounded segments across the whole line, filled by quality. */
+		int p = sig_pct(s->signal), nseg = 10, lit = (p * nseg + 50) / 100;
+		if (p > 0 && !lit) lit = 1;
+		uint32_t col = c->backfill ? C_WHITE : p >= 50 ? C_OK : p >= 25 ? C_WARN : C_BAD;
+		int width = sp.x1 - sp.x0 + 1, gap = 3, sw = (width - (nseg - 1) * gap) / nseg, y0 = y + (h - wd->size) / 2;
+		for (int i = 0; i < nseg; i++) {
+			if (c->backfill && i < lit)
+				lcd_rrect(l, sp.x0 + i * (sw + gap) - 1, y0 - 1, sw + 2, wd->size + 2, 3, RGB(12, 16, 12));
+			lcd_rrect(l, sp.x0 + i * (sw + gap), y0, sw, wd->size, 2, i < lit ? col : C_TRACK);
+		}
 		break;
 	}
 	case W_SIGBAR: {
