@@ -1245,7 +1245,7 @@ static void draw_globe(lcd_t *l, int cx, int cy, int r, uint32_t c)
 static void draw_fan(lcd_t *l, int cx, int base, int size, int pct, uint32_t col, uint32_t dimc, int shadow)
 {
 	/* small fans get three arcs with wider spacing: four arcs 20% apart mush together below ~20 px */
-	int narcs = size < 20 ? 3 : 4, step = narcs == 3 ? 30 : 20;
+	int narcs = size < 20 ? 3 : 4, step = narcs == 3 ? 40 : 20;   /* 3-arc spacing sets the glyph height (as tall as the port icon) */
 	int lit = (pct * narcs + 50) / 100, thick = size >= 32 ? 3 : 2;
 	for (int pass = shadow ? 0 : 1; pass < 2; pass++) {
 		uint32_t lc = pass ? col : RGB(12, 16, 12), dc = pass ? dimc : RGB(12, 16, 12);
@@ -1382,9 +1382,16 @@ static uint32_t upl_color(int state)
  * the port glyph is centred in its box, the fan must be anchored by this centre to line up. */
 static int fan_centre_off(int fs)
 {
-	int narcs = fs < 20 ? 3 : 4, step = narcs == 3 ? 30 : 20;
+	int narcs = fs < 20 ? 3 : 4, step = narcs == 3 ? 40 : 20;
 	int rmax = fs * (38 + (narcs - 1) * step) / 100, cy = fs / 8, dr = fs / 10 < 2 ? 2 : fs / 10;
-	return (rmax + 1 - dr) / 2 + cy;   /* base is this far below the glyph centre */
+	return (rmax + 1 - dr) / 2 + cy;   /* base is this far below the glyph centre; step as in draw_fan */
+}
+
+/* Centre of the port glyph (body + cable stub) relative to its box top. */
+static int port_centre_rel(int size)
+{
+	int h = size >= 24 ? 14 : 10, stub = size >= 24 ? 5 : 3;
+	return (size - h) / 2 - 2 + (h + stub) / 2;
 }
 
 /* Ethernet port: rounded outline, three pins, cable stub below. */
@@ -1420,7 +1427,7 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 		copy(lab, sizeof(lab), generic ? (v[i].wifi ? "WiFi" : "Eth") : v[i].label);
 		if (split && v[i].pct >= 0) snprintf(lab + strlen(lab), sizeof(lab) - strlen(lab), " %d%%", v[i].pct);
 		if (layout) {
-			int ry = y + i * rowh, fbase = ry + size / 2 - 2 + fan_centre_off(fs);   /* fan centre = port centre */
+			int ry = y + i * rowh, fbase = ry + port_centre_rel(size) + fan_centre_off(fs);   /* fan centre = port centre */
 			const font_t *lf = size >= 24 ? &FONT_T16B : &FONT_T12, *lf2 = lf;
 			if (!noname) {
 				lf2 = ((int)strlen(lab) * lf->w > sp.x1 - sp.x0 - (noicon ? 0 : size + 6) && lf != &FONT_T12) ? &FONT_T12 : lf;   /* shrink before truncating */
@@ -1435,13 +1442,13 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 			}
 			if (!noname) {
 				/* centre the label on the icon glyph (fan and port share the same centre) */
-				int lyy = !noicon && v[i].wifi ? ry + size / 2 - 2 - lf2->h / 2 : ry + (rowh - lf2->h) / 2;
+				int lyy = !noicon && v[i].wifi ? ry + port_centre_rel(size) - lf2->h / 2 : ry + (rowh - lf2->h) / 2;
 				lcd_draw(l, lf2, gx + (noicon ? 0 : size + 6), lyy, out, col, LCD_TRANSPARENT, 1);
 			}
 		} else {
 			int cw = (sp.x1 - sp.x0 + 1) / n, cx = sp.x0 + cw * i + cw / 2;
 			if (!noicon) {
-				if (v[i].wifi) draw_fan(l, cx, y + size / 2 - 2 + fan_centre_off(fs), fs, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
+				if (v[i].wifi) draw_fan(l, cx, y + port_centre_rel(size) + fan_centre_off(fs), fs, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
 				else draw_port(l, cx, y, size, col);
 			}
 			if (!noname) {
