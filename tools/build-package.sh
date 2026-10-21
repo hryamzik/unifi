@@ -2,7 +2,7 @@
 # Build the utr-lcd package with the official OpenWrt SDK (docker) for ipq40xx/generic.
 #
 #   tools/build-package.sh [SDK_TAG]        default tag: ipq40xx-generic-master (snapshot -> .apk)
-#   e.g. tools/build-package.sh ipq40xx-generic-24.10.0   -> .ipk for opkg-based releases
+#   e.g. tools/build-package.sh ipq40xx-generic-24.10.4   -> .ipk for opkg-based releases
 #
 # The SDK is cached in the docker volume utr-sdk-<tag> (docker volume rm to reset).
 # Output: build/sdk-out/<tag>/ (package files + index)
@@ -18,6 +18,13 @@ docker run --rm --platform linux/amd64 \
 		[ -d package ] || bash ./setup.sh      # first run: downloads the SDK into the cached volume
 		rm -rf package/utr-lcd && cp -r /src package/utr-lcd
 		make defconfig >/dev/null
+		# some stable SDK images are built for another target with the same CPU architecture
+		# (e.g. bcm2709, arm_cortex-a7_neon-vfpv4): the binaries are identical, only the
+		# @TARGET_ipq40xx restriction must go
+		if ! grep -q "^CONFIG_TARGET_ipq40xx=y" .config; then
+			echo "NOTE: SDK target is not ipq40xx ($(grep -m1 ^CONFIG_TARGET_BOARD .config)); same arch, dropping @TARGET_ipq40xx"
+			sed -i "s/@TARGET_ipq40xx //" package/utr-lcd/Makefile
+		fi
 		echo "CONFIG_PACKAGE_utr-lcd=m" >> .config
 		make defconfig >/dev/null
 		make package/utr-lcd/compile V=s -j"$(nproc)" 2>&1 | tail -40

@@ -77,7 +77,7 @@ Findings about the stock firmware are in `docs/stock-ui-notes.md`.
 
 ```sh
 tools/build-package.sh                                # snapshot SDK  -> build/sdk-out/*/utr-lcd-*.apk
-tools/build-package.sh ipq40xx-generic-24.10.0        # opkg release -> .ipk
+tools/build-package.sh ipq40xx-generic-24.10.4        # opkg release -> .ipk
 make -C package/utr-lcd/src CC=...                    # just the C programs
 ```
 
