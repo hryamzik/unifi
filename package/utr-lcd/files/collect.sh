@@ -12,6 +12,8 @@
 #   wan_ip     IPv4 address of the uplink device
 #   lan_ip     IPv4 address of the LAN bridge
 #   inet       ok|fail   a ping to 1.1.1.1 got through (only printed when up_state=up)
+#   ups        number of uplinks (default routes in any table, VPN devices excluded, lowest metric first; at most 3)
+#   upN_dev upN_type upN_name upN_signal upN_speed upN_metric   for N = 0..ups-1 (N=0 is the same uplink as up_*)
 #   vpn_state  up|down|none
 #   vpn_name   VPN interface name
 #   clients    LAN clients (complete ARP entries on the LAN bridge)
@@ -61,6 +63,34 @@ if [ -n "$up_dev" ]; then
 else
 	echo "up_state=down"
 fi
+
+# all uplinks (multi-WAN: failover or balancing, mwan3 or plain routes), lowest metric first
+n=0
+for e in $(ip route show table all 2>/dev/null | awk '$1=="default"{m=0; d=""; for(i=1;i<NF;i++){if($i=="dev")d=$(i+1); if($i=="metric")m=$(i+1)} if(d!="") print m":"d}' | sort -t: -k1,1n); do
+	d=${e#*:}
+	is_vpn "$d" && continue
+	case " $seen " in *" $d "*) continue ;; esac
+	seen="$seen $d"
+	[ "$n" -ge 3 ] && break
+	info=$(iwinfo "$d" info 2>/dev/null)
+	echo "up${n}_dev=$d"
+	echo "up${n}_metric=${e%%:*}"
+	if echo "$info" | grep -q 'Mode: Client'; then
+		echo "up${n}_type=wifi"
+		echo "up${n}_name=$(echo "$info" | sed -n 's/.*ESSID: "\(.*\)"/\1/p' | head -n1)"
+		echo "up${n}_signal=$(echo "$info" | sed -n 's/.*Signal: \(-\{0,1\}[0-9]*\) dBm.*/\1/p' | head -n1)"
+		echo "up${n}_speed=$(echo "$info" | sed -n 's/.*Bit Rate: \([0-9]*\).*/\1/p' | head -n1)"
+	else
+		case "$d" in
+		usb*|rndis*|enx*|rmnet*|wwan*) echo "up${n}_type=usb"; echo "up${n}_name=USB" ;;
+		*) echo "up${n}_type=eth"; echo "up${n}_name=Ethernet" ;;
+		esac
+		spd=$(cat "/sys/class/net/$d/speed" 2>/dev/null)
+		case "$spd" in ''|-*) echo "up${n}_speed=0" ;; *) echo "up${n}_speed=$spd" ;; esac
+	fi
+	n=$((n + 1))
+done
+echo "ups=$n"
 
 # VPN: first matching interface
 vpn=""

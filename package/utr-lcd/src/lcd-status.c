@@ -29,6 +29,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <time.h>
 #include "lcd.h"
 
@@ -71,6 +72,8 @@ typedef struct {
 	int signal, has_signal, speed, clients;
 	long uptime;
 	int valid;
+	int nups;                                  /* uplinks, lowest metric first (ups[0] is the one in up_*) */
+	struct { char dev[16], type[16], name[64]; int signal, has_signal, speed, metric; } ups[3];
 } status_t;
 
 static void collect_parse(status_t *s, char *line)
@@ -91,6 +94,18 @@ static void collect_parse(status_t *s, char *line)
 	else if (!strcmp(line, "inet")) copy(s->inet, sizeof(s->inet), eq);
 	else if (!strcmp(line, "clients")) s->clients = atoi(eq);
 	else if (!strcmp(line, "uptime")) s->uptime = atol(eq);
+	else if (!strcmp(line, "ups")) s->nups = atoi(eq) > 3 ? 3 : atoi(eq);
+	else if (!strncmp(line, "up", 2) && line[2] >= '0' && line[2] <= '2' && line[3] == '_') {
+		int n = line[2] - '0';
+		const char *k = line + 4;
+		if (!strcmp(k, "dev")) copy(s->ups[n].dev, sizeof(s->ups[n].dev), eq);
+		else if (!strcmp(k, "type")) copy(s->ups[n].type, sizeof(s->ups[n].type), eq);
+		else if (!strcmp(k, "name")) copy(s->ups[n].name, sizeof(s->ups[n].name), eq);
+		else if (!strcmp(k, "signal")) { s->ups[n].has_signal = *eq != 0; s->ups[n].signal = atoi(eq); }
+		else if (!strcmp(k, "speed")) s->ups[n].speed = atoi(eq);
+		else if (!strcmp(k, "metric")) s->ups[n].metric = atoi(eq);
+		else return;
+	}
 	else return;
 	s->valid = 1;
 }
@@ -148,7 +163,8 @@ static int coll_poll(collector_t *c, status_t *out)
 #define MAX_CL 24
 #define TRAFFIC_COLORS 12
 typedef struct { char id[24], name[32]; double rate, total; int online, color; } cl_t;
-typedef struct { int valid; double down, up, dtot, utot; cl_t c[MAX_CL]; int n; } traffic_t;
+typedef struct { char dev[16]; double down, up; } upl_t;
+typedef struct { int valid; double down, up, dtot, utot; cl_t c[MAX_CL]; int n; upl_t u[3]; int nu; } traffic_t;
 
 static const uint32_t PALETTE[TRAFFIC_COLORS] = {
 	RGB(0, 200, 255), RGB(255, 150, 30), RGB(230, 70, 200), RGB(150, 230, 40), RGB(150, 110, 255), RGB(255, 220, 50),
@@ -200,6 +216,13 @@ static void traffic_load(traffic_t *t, const char *path)
 		else if (!strcmp(line, "up_bps")) t->up = atof(eq);
 		else if (!strcmp(line, "down_total")) t->dtot = atof(eq);
 		else if (!strcmp(line, "up_total")) t->utot = atof(eq);
+		else if (!strcmp(line, "uplink") && t->nu < 3) {
+			char *f1 = strtok(eq, "|"), *f2 = strtok(NULL, "|"), *f3 = strtok(NULL, "|");
+			if (!f1 || !f2 || !f3) continue;
+			copy(t->u[t->nu].dev, sizeof(t->u[t->nu].dev), f1);
+			t->u[t->nu].down = atof(f2); t->u[t->nu].up = atof(f3);
+			t->nu++;
+		}
 		else if (!strcmp(line, "client") && t->n < MAX_CL) {
 			cl_t *c = &t->c[t->n];
 			char *f1 = strtok(eq, "|"), *f2 = strtok(NULL, "|"), *f3 = strtok(NULL, "|"), *f4 = strtok(NULL, "|"), *f5 = strtok(NULL, "|");
@@ -265,10 +288,59 @@ static void fmt_bytes(double v, char *out, size_t n)
 	else snprintf(out, n, "%.0f %s", v, U[u]);
 }
 
+/* ------------------------------------------------------------------------------------- resources */
+
+typedef struct { int valid, cpu, ram, flash, temp; } res_t;     /* percent; temp in degrees C, -1 = no sensor */
+typedef struct { unsigned long long total, idle; int have; } cpu_prev_t;
+
+static void res_sample(res_t *r, cpu_prev_t *cp)
+{
+	FILE *f = fopen("/proc/stat", "r");
+	unsigned long long v[8] = { 0 };
+	if (f) {
+		if (fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]) >= 4) {
+			unsigned long long tot = 0, idle = v[3] + v[4];
+			for (int i = 0; i < 8; i++) tot += v[i];
+			if (cp->have && tot > cp->total) r->cpu = (int)(100 - (idle - cp->idle) * 100 / (tot - cp->total));
+			cp->total = tot; cp->idle = idle; cp->have = 1;
+		}
+		fclose(f);
+	}
+	f = fopen("/proc/meminfo", "r");
+	if (f) {
+		char line[96];
+		unsigned long long tot = 0, avail = 0, fr = 0, buf = 0, cache = 0, x;
+		while (fgets(line, sizeof(line), f)) {
+			if (sscanf(line, "MemTotal: %llu", &x) == 1) tot = x;
+			else if (sscanf(line, "MemAvailable: %llu", &x) == 1) avail = x;
+			else if (sscanf(line, "MemFree: %llu", &x) == 1) fr = x;
+			else if (sscanf(line, "Buffers: %llu", &x) == 1) buf = x;
+			else if (sscanf(line, "Cached: %llu", &x) == 1) cache = x;
+		}
+		fclose(f);
+		if (!avail) avail = fr + buf + cache;
+		if (tot) r->ram = (int)(100 - avail * 100 / tot);
+	}
+	struct statvfs sv;
+	if (!statvfs("/overlay", &sv) || !statvfs("/", &sv))
+		if (sv.f_blocks) r->flash = (int)(100 - (unsigned long long)sv.f_bavail * 100 / sv.f_blocks);
+	r->temp = -1;
+	for (int i = 0; i < 8 && r->temp < 0; i++) {
+		char path[64];
+		int mc;
+		snprintf(path, sizeof(path), "/sys/class/hwmon/hwmon%d/temp1_input", i);
+		f = fopen(path, "r");
+		if (f) { if (fscanf(f, "%d", &mc) == 1) r->temp = mc / 1000; fclose(f); }
+	}
+	if (r->cpu < 0) r->cpu = 0;
+	r->valid = 1;
+}
+
 /* ---------------------------------------------------------------------------------- configuration */
 
 enum { W_SSID, W_DBM, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
-       W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT, W_NTYPES };
+       W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
+       W_CPU, W_RAM, W_FLASH, W_TEMP, W_MULTIWAN, W_NTYPES };
 enum { ST_DOT, ST_PILL, ST_NONE };
 
 typedef struct { const char *name; int def_size; } wtype_t;
@@ -288,6 +360,11 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_LEGEND]  = { "legend", 4 },          /* size = number of client rows; colour, name, current speed */
 	[W_LEGENDTOTAL] = { "legendtotal", 4 }, /* same, with each client's total */
 	[W_DONUT]   = { "donut", 80 },          /* current speed split by client, size = diameter */
+	[W_CPU]     = { "cpu", 16 },            /* resource rows: label, bar, percent; size 12 or 16 */
+	[W_RAM]     = { "ram", 16 },
+	[W_FLASH]   = { "flash", 16 },
+	[W_MULTIWAN] = { "multiwan", 16 },      /* share of traffic per uplink (hidden with a single uplink); size 12 or 16 */
+	[W_TEMP]    = { "temp", 16 },           /* Wi-Fi chip temperature (hidden when there is no sensor) */
 };
 
 #define MAX_WIDGETS 16
@@ -316,7 +393,8 @@ static const char DEFAULT_CONF[] =
 	"screen=Traffic\ndwell=8\nindicator=dot\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
 	"widget=usagebar:12\nwidget=legend:4\n"
 	"screen=Details\ndwell=5\nindicator=dot\nbackfill=1\n"
-	"widget=wanip:16\nwidget=lanip:16\nwidget=vpn:16\nwidget=uptime:16\n";
+	"widget=wanip:16\nwidget=lanip:16\nwidget=vpn:16\nwidget=uptime:16\n"
+	"widget=cpu:16\nwidget=ram:16\nwidget=flash:16\nwidget=temp:16\n";
 
 static void conf_line(config_t *c, char *line)
 {
@@ -534,13 +612,13 @@ static int sig_pct(int dbm) { int p = (dbm + 90) * 100 / 40; return p < 0 ? 0 : 
 static uint32_t scale_rgb(int r, int g, int b, int pct) { return RGB(r * pct / 100, g * pct / 100, b * pct / 100); }
 
 /* Vertical backfill from the bottom: red when the signal is poor, green when it is full. */
-static void draw_backfill(lcd_t *l, int pct, int dim, int edge)
+static void draw_backfill(lcd_t *l, int pct, int dim, int edge, int x0, int x1)
 {
 	int r, g, b = 0;
 	if (pct < 50) { r = 255; g = pct * 51 / 10; } else { r = 255 - (pct - 50) * 51 / 10; g = 235; }
 	int top = l->h - l->h * pct / 100;
-	lcd_fill(l, 0, top, l->w, l->h - top, scale_rgb(r, g, b, dim));
-	if (edge && pct > 0 && pct < 100) lcd_fill(l, 0, top, l->w, 3, scale_rgb(r, g, b, dim + 22 > 100 ? 100 : dim + 22));
+	lcd_fill(l, x0, top, x1 - x0, l->h - top, scale_rgb(r, g, b, dim));
+	if (edge && pct > 0 && pct < 100) lcd_fill(l, x0, top, x1 - x0, 3, scale_rgb(r, g, b, dim + 22 > 100 ? 100 : dim + 22));
 }
 
 static void draw_pill(lcd_t *l, const win_t *w, int y, const char *text, uint32_t dot)
@@ -689,9 +767,72 @@ static void draw_speed_line(lcd_t *l, span_t sp, int y, int h, int size, int dow
 	lcd_draw(l, &FONT_T12, x + 4, y + (h + f->h) / 2 - 12 - 1, unit, C_DIM, LCD_TRANSPARENT, 1);
 }
 
+/* Resource row: label, bar (green, amber above 60 %, red above 85 %), value. */
+static void draw_resource(lcd_t *l, span_t sp, int y, int h, int size, const char *label, int pct, uint32_t track)
+{
+	/* size < 16 means the small row text (also chosen for a whole screen when its rows had to shrink) */
+	const font_t *lf = size >= 16 ? &FONT_T16 : &FONT_T12, *vf = size >= 16 ? &FONT_T16B : &FONT_T12;
+	char val[8];
+	snprintf(val, sizeof(val), "%d%%", pct);
+	int lw = lcd_text_w(lf, "Flash", 1) + 4, vw = lcd_text_w(vf, "100%", 1), bw = sp.x1 + 1 - sp.x0 - lw - vw - 6;
+	lcd_draw(l, lf, sp.x0, y + (h - lf->h) / 2, label, C_DIM, LCD_TRANSPARENT, 1);
+	if (bw >= 12) {
+		uint32_t c = pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD;
+		int fw = bw * (pct > 100 ? 100 : pct) / 100, bh = size >= 16 ? 8 : 6;
+		lcd_rrect(l, sp.x0 + lw, y + (h - bh) / 2, bw, bh, 3, track);
+		if (fw >= 4) lcd_rrect(l, sp.x0 + lw, y + (h - bh) / 2, fw, bh, 3, c);
+	}
+	lcd_draw(l, vf, sp.x1 + 1 - lcd_text_w(vf, val, 1), y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
+}
+
+#define UPL_COLORS 3
+static const uint32_t UPL_COLOR[UPL_COLORS] = { RGB(0, 150, 255), RGB(255, 150, 30), RGB(230, 70, 200) };
+
+/* Name of uplink n for display. */
+static const char *uplink_label(const status_t *s, int n)
+{
+	if (!strcmp(s->ups[n].type, "wifi")) return s->ups[n].name[0] ? s->ups[n].name : "Wi-Fi";
+	if (!strcmp(s->ups[n].type, "usb")) return "USB";
+	return "Ethernet";
+}
+
+/* Per uplink: name and share of the current traffic, then a bar in the uplink's colour. */
+static void draw_multiwan(lcd_t *l, const win_t *w, const status_t *s, const traffic_t *t, int size, int y)
+{
+	const font_t *lf = size >= 16 ? &FONT_T16B : &FONT_T12;
+	int bh = size >= 16 ? 8 : 6, row = lf->h + 2 + bh + 4;
+	double tot = 0, v[3] = { 0 };
+	for (int i = 0; i < s->nups; i++) {
+		for (int j = 0; j < t->nu; j++)
+			if (!strcmp(t->u[j].dev, s->ups[i].dev)) v[i] = t->u[j].down + t->u[j].up;
+		tot += v[i];
+	}
+	for (int i = 0; i < s->nups; i++, y += row) {
+		span_t sp = span_for(w, y, row);
+		int pct = tot > 0 ? (int)(v[i] * 100 / tot + 0.5) : 0;
+		char val[16], nm[64];
+		if (!t->valid) copy(val, sizeof(val), "--");
+		else if (tot <= 0) copy(val, sizeof(val), "idle");
+		else if (pct == 0 && i > 0 && s->ups[i].metric > s->ups[0].metric) copy(val, sizeof(val), "backup");
+		else snprintf(val, sizeof(val), "%d%%", pct);
+		int vw = lcd_text_w(lf, val, 1);
+		ellipsize(lf, uplink_label(s, i), sp.x1 + 1 - sp.x0 - vw - 6, 0, nm, sizeof(nm));
+		lcd_draw(l, lf, sp.x0, y, nm, C_WHITE, LCD_TRANSPARENT, 1);
+		lcd_draw(l, lf, sp.x1 + 1 - vw, y, val, C_DIM, LCD_TRANSPARENT, 1);
+		int bw = sp.x1 - sp.x0 + 1, by = y + lf->h + 2;
+		lcd_rrect(l, sp.x0, by, bw, bh, 3, C_TRACK);
+		if (tot > 0 && pct > 0 && bw * pct / 100 >= 4) lcd_rrect(l, sp.x0, by, bw * pct / 100, bh, 3, UPL_COLOR[i % UPL_COLORS]);
+	}
+}
+
+static int multiwan_h(const status_t *s, int size)
+{
+	return s->nups >= 2 ? s->nups * ((size >= 16 ? FONT_T16B.h : FONT_T12.h) + 2 + (size >= 16 ? 8 : 6) + 4) : 0;
+}
+
 /* ---------------------------------------------------------------------------------------- widgets */
 
-typedef struct { const status_t *s; const traffic_t *tr; const char *state; int backfill; int row_step; int name_len; } ctx_t;
+typedef struct { const status_t *s; const traffic_t *tr; const res_t *res; const char *state; int backfill; int row_step; int name_len; } ctx_t;
 
 #define PAD 2
 #define RULE_H 6
@@ -712,6 +853,8 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	case W_LEGEND: return legend_rows(c->tr, 0, wd->size) * LEGEND_ROW;
 	case W_LEGENDTOTAL: return legend_rows(c->tr, 1, wd->size) * LEGEND_ROW;
 	case W_DONUT: return wd->size + PAD;
+	case W_TEMP: return c->res->temp >= 0 ? wd->size + PAD : 0;
+	case W_MULTIWAN: return multiwan_h(c->s, wd->size);
 	default: return wd->size + PAD;
 	}
 }
@@ -781,15 +924,27 @@ static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, 
 	case W_LEGEND: draw_legend(l, w, c->tr, 0, wd->size, y, c->name_len); break;
 	case W_LEGENDTOTAL: draw_legend(l, w, c->tr, 1, wd->size, y, c->name_len); break;
 	case W_DONUT: draw_donut(l, c->tr, w->cx, y + h / 2, (wd->size - 2) / 2); break;
+	case W_MULTIWAN: draw_multiwan(l, w, s, c->tr, wd->size, y); break;
+	case W_CPU: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "CPU", c->res->cpu, C_TRACK); break;
+	case W_RAM: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "RAM", c->res->ram, C_TRACK); break;
+	case W_FLASH: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "Flash", c->res->flash, C_TRACK); break;
+	case W_TEMP: {
+		int big = wd->size >= 16 && !c->row_step;
+		const font_t *lf = big ? &FONT_T16 : &FONT_T12, *vf = big ? &FONT_T16B : &FONT_T12;
+		snprintf(buf, sizeof(buf), "%dC", c->res->temp);
+		lcd_draw(l, lf, sp.x0, y + (h - lf->h) / 2, "Wi-Fi", C_DIM, LCD_TRANSPARENT, 1);
+		lcd_draw(l, vf, sp.x1 + 1 - lcd_text_w(vf, buf, 1), y + (h - vf->h) / 2, buf, c->res->temp >= 85 ? C_BAD : c->res->temp >= 75 ? C_WARN : C_WHITE, LCD_TRANSPARENT, 1);
+		break;
+	}
 	}
 }
 
 /* ----------------------------------------------------------------------------------------- screen */
 
 static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const screen_t *sc, const status_t *s, const traffic_t *tr,
-			const char *state)
+			const res_t *res, const char *state)
 {
-	ctx_t c = { s, tr, state, sc->backfill, 0, cf->name_len };
+	ctx_t c = { s, tr, res, state, sc->backfill, 0, cf->name_len };
 	lcd_fill(l, 0, 0, l->w, l->h, C_BG);
 
 	if (!s->valid) {
@@ -799,8 +954,15 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 	}
 
 	int up = !strcmp(s->up_state, "up");
-	if (sc->backfill && up && !strcmp(s->up_type, "wifi") && s->has_signal)
-		draw_backfill(l, sig_pct(s->signal), cf->fill_dim, cf->fill_edge);
+	if (sc->backfill && up) {
+		/* Wi-Fi uplinks only; with several, the screen is split into one vertical strip each */
+		int wf[3], nw = 0;
+		for (int i = 0; i < s->nups; i++)
+			if (!strcmp(s->ups[i].type, "wifi") && s->ups[i].has_signal) wf[nw++] = s->ups[i].signal;
+		if (!s->nups && !strcmp(s->up_type, "wifi") && s->has_signal) wf[nw++] = s->signal;
+		for (int i = 0; i < nw; i++)
+			draw_backfill(l, sig_pct(wf[i]), cf->fill_dim, cf->fill_edge, l->w * i / nw, l->w * (i + 1) / nw);
+	}
 
 	/* status indicator: dot, grown into a text banner when something is wrong */
 	int bad = strcmp(state, "ready") != 0, top = w->y0 + 4;
@@ -842,7 +1004,14 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 static int screen_uses_traffic(const screen_t *sc)
 {
 	for (int i = 0; i < sc->nw; i++)
-		if (sc->w[i].type >= W_SPEED) return 1;
+		if ((sc->w[i].type >= W_SPEED && sc->w[i].type <= W_DONUT) || sc->w[i].type == W_MULTIWAN) return 1;
+	return 0;
+}
+
+static int screen_uses_res(const screen_t *sc)
+{
+	for (int i = 0; i < sc->nw; i++)
+		if (sc->w[i].type >= W_CPU && sc->w[i].type <= W_TEMP) return 1;
 	return 0;
 }
 
@@ -907,6 +1076,9 @@ int main(int argc, char **argv)
 	long next_collect = 0, switch_at = 0, bl_checked = 0;
 	int dark = 0, trace = getenv("LCD_TRACE") != NULL;
 	traffic_t tr = { 0 }, tr_new;
+	res_t res = { .temp = -1 };
+	cpu_prev_t cpu_prev = { 0 };
+	long res_at = 0;
 	long tr_at = 0;
 	unsigned tr_gen = 0;
 
@@ -939,16 +1111,24 @@ int main(int argc, char **argv)
 			if (memcmp(&tr, &tr_new, sizeof(tr))) { tr = tr_new; tr_gen++; }
 			tr_at = now;
 		}
+		/* resources: read once a second while the screen on show has such rows (CPU load needs two samples) */
+		if (screen_uses_res(&cf.s[order[pos]]) && (now - res_at >= 1000 || res_at == 0)) {
+			res_sample(&res, &cpu_prev);
+			res_at = now;
+		}
 		if (have_data) {
 			int up = !strcmp(st.up_state, "up");
 			const char *state = !up ? "noUplink" : fails >= 2 ? "noInternet" : "ready";
-			char up_s[32];
+			char up_s[32], ups_s[160] = "";
 			fmt_uptime(st.uptime, up_s, sizeof(up_s));
-			snprintf(sig, sizeof(sig), "%u|%d|%s|%d|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s|%d|%s", tr_gen, pos, state, st.valid, st.up_type,
+			for (int i = 0; i < st.nups; i++)
+				snprintf(ups_s + strlen(ups_s), sizeof(ups_s) - strlen(ups_s), "%s/%s/%d,", st.ups[i].dev, st.ups[i].name, st.ups[i].signal);
+			snprintf(sig, sizeof(sig), "%d,%d,%d,%d|%u|%d|%s|%d|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s|%d|%s", res.cpu, res.ram, res.flash, res.temp, tr_gen, pos, state, st.valid, st.up_type,
 				 st.up_name, st.up_detail, st.wan_ip, st.lan_ip, st.has_signal, st.signal, st.speed, st.vpn_state,
 				 st.vpn_name, st.inet, st.clients, up_s);
+			strncat(sig, ups_s, sizeof(sig) - strlen(sig) - 1);
 			if (pos != drawn_pos || strcmp(sig, prev)) {
-				draw_screen(&l, &w, &cf, &cf.s[order[pos]], &st, &tr, state);
+				draw_screen(&l, &w, &cf, &cf.s[order[pos]], &st, &tr, &res, state);
 				if (trace) fprintf(stderr, "%ld screen %d\n", now, order[pos] + 1);
 				drawn_pos = pos;
 				copy(prev, sizeof(prev), sig);
