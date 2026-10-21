@@ -339,7 +339,7 @@ static void res_sample(res_t *r, cpu_prev_t *cp)
 
 /* ---------------------------------------------------------------------------------- configuration */
 
-enum { W_SSID, W_DBM, W_BARS, W_DOT, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
+enum { W_SSID, W_DBM, W_BARS, W_SIGBAR, W_DOT, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
        W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
        W_CPU, W_RAM, W_FLASH, W_TEMP, W_MULTIWAN, W_ROW, W_NTYPES };
 enum { ST_DOT, ST_PILL, ST_NONE };
@@ -349,6 +349,7 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_SSID]    = { "ssid", 24 },
 	[W_DBM]     = { "dbm", 32 },
 	[W_BARS]    = { "bars", 24 },           /* Wi-Fi signal as 5 ascending bars (Wi-Fi only); size = tallest bar */
+	[W_SIGBAR]  = { "sigbar", 16 },         /* Wi-Fi signal as a resource-style line bar; size >= 24: tall bar, text on top */
 	[W_DOT]     = { "dot", 16 },            /* online status as a dot, like the screen indicator but placeable */
 	[W_ROW]     = { "row", 0 },             /* sub-widgets side by side on one line (a+b+c in the config) */
 	[W_CLIENTS] = { "clients", 24 },
@@ -396,7 +397,7 @@ typedef struct {
 
 static const char DEFAULT_CONF[] =
 	"fill_dim=30\nfill_edge=1\n"
-	"screen=Status\ndwell=8\nindicator=dot\nbackfill=1\nwidget=ssid:24\nwidget=dbm:32\nwidget=clients:24\n"
+	"screen=Status\ndwell=8\nindicator=dot\nbackfill=1\nwidget=ssid:24\nwidget=bars:24+dbm:16\nwidget=clients:24\n"
 	"screen=Traffic\ndwell=8\nindicator=dot\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
 	"widget=usagebar:12\nwidget=legend:4\n"
 	"screen=Details\ndwell=5\nindicator=dot\nbackfill=1\n"
@@ -626,6 +627,14 @@ static void row_text(lcd_t *l, span_t sp, int y, int h, int size, const char *la
 	lcd_draw(l, VAL[st], sp.x1 + 1 - lcd_text_w(VAL[st], buf, 1), y + (h - VAL[st]->h) / 2, buf, vc, LCD_TRANSPARENT, 1);
 }
 
+static void fmt_uptime_short(long t, char *out, size_t n)
+{
+	long d = t / 86400, h = t % 86400 / 3600, m = t % 3600 / 60;
+	if (d > 0) snprintf(out, n, "%ldd%ldh", d, h);
+	else if (h > 0) snprintf(out, n, "%ldh%02ldm", h, m);
+	else snprintf(out, n, "%ldm", m);
+}
+
 static void fmt_uptime(long t, char *out, size_t n)
 {
 	long d = t / 86400, h = t % 86400 / 3600, m = t % 3600 / 60;
@@ -801,22 +810,41 @@ static void draw_speed_line(lcd_t *l, span_t sp, int y, int h, int size, int dow
 	lcd_draw(l, uf, x + 4, y + (h + f->h) / 2 - uf->h - 1, unit, C_DIM, LCD_TRANSPARENT, 1);
 }
 
-/* Resource row: label, bar (green, amber above 60 %, red above 85 %), value. */
-static void draw_resource(lcd_t *l, span_t sp, int y, int h, int size, const char *label, int pct, uint32_t track)
+/* Label, horizontal bar, value - the resource-row look. The label column fits the widest
+ * label ("Signal") so bars align when such rows are stacked. */
+static void draw_bar_row(lcd_t *l, span_t sp, int y, int h, int size, const char *label, int pct, const char *val, uint32_t fillc)
 {
 	/* size < 16 means the small row text (also chosen for a whole screen when its rows had to shrink) */
 	const font_t *lf = size >= 16 ? &FONT_T16 : &FONT_T12, *vf = size >= 16 ? &FONT_T16B : &FONT_T12;
-	char val[8];
-	snprintf(val, sizeof(val), "%d%%", pct);
-	int lw = lcd_text_w(lf, "Flash", 1) + 4, vw = lcd_text_w(vf, "100%", 1), bw = sp.x1 + 1 - sp.x0 - lw - vw - 6;
+	int lw = lcd_text_w(lf, "Signal", 1) + 4, vw = lcd_text_w(vf, val, 1), bw = sp.x1 + 1 - sp.x0 - lw - vw - 6;
 	lcd_draw(l, lf, sp.x0, y + (h - lf->h) / 2, label, C_DIM, LCD_TRANSPARENT, 1);
 	if (bw >= 12) {
-		uint32_t c = pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD;
 		int fw = bw * (pct > 100 ? 100 : pct) / 100, bh = size >= 16 ? 8 : 6;
-		lcd_rrect(l, sp.x0 + lw, y + (h - bh) / 2, bw, bh, 3, track);
-		if (fw >= 4) lcd_rrect(l, sp.x0 + lw, y + (h - bh) / 2, fw, bh, 3, c);
+		lcd_rrect(l, sp.x0 + lw, y + (h - bh) / 2, bw, bh, 3, C_TRACK);
+		if (fw >= 4) lcd_rrect(l, sp.x0 + lw, y + (h - bh) / 2, fw, bh, 3, fillc);
 	}
 	lcd_draw(l, vf, sp.x1 + 1 - lcd_text_w(vf, val, 1), y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
+}
+
+/* Resource row: bar (green, amber above 60 %, red above 85 %), value in percent. */
+static void draw_resource(lcd_t *l, span_t sp, int y, int h, int size, const char *label, int pct, uint32_t track)
+{
+	(void)track;
+	char val[8];
+	snprintf(val, sizeof(val), "%d%%", pct);
+	draw_bar_row(l, sp, y, h, size, label, pct, val, pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD);
+}
+
+/* Clock face for the icon form of uptime (shared lines, where the "Uptime" label does not fit). */
+static void draw_clock(lcd_t *l, int x, int y, uint32_t c)
+{
+	int cx = x + 8, cy = y + 8;
+	for (int a = 0; a < 64; a++) {
+		double t = a * M_PI / 32;
+		lcd_fill(l, cx + (int)lround(7 * cos(t)) - 1, cy + (int)lround(7 * sin(t)) - 1, 2, 2, c);
+	}
+	lcd_fill(l, cx - 1, cy - 5, 2, 6, c);
+	lcd_fill(l, cx - 1, cy - 1, 6, 2, c);
 }
 
 #define UPL_COLORS 3
@@ -890,6 +918,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 		return !strcmp(c->s->up_state, "up") && (wifi || c->s->speed > 0) ? wd->size + PAD : 0;
 	}
 	case W_BARS:
+	case W_SIGBAR:
 		return !strcmp(c->s->up_state, "up") && c->s->has_signal && !strcmp(c->s->up_type, "wifi") ? wd->size + PAD : 0;
 	case W_WANIP: return c->s->wan_ip[0] ? wd->size + PAD : 0;
 	case W_LANIP: return c->s->lan_ip[0] ? wd->size + PAD : 0;
@@ -954,6 +983,25 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 			lcd_fill(l, bx + i * (bw + bg), base - wd->size * (i + 1) / nb, bw, wd->size * (i + 1) / nb, i < lit ? col : C_TRACK);
 		break;
 	}
+	case W_SIGBAR: {
+		int p = sig_pct(s->signal);
+		uint32_t col = p >= 50 ? C_OK : p >= 25 ? C_WARN : C_BAD;
+		snprintf(buf, sizeof(buf), "%d dBm", s->signal);
+		if (wd->size >= 24) {
+			/* tall bar with the value on top of it */
+			int bw2 = sp.x1 - sp.x0 + 1, by = y + (h - wd->size) / 2, fw = bw2 * p / 100;
+			const font_t *f = lcd_text_w(&FONT_T16B, buf, 1) <= bw2 - 8 ? &FONT_T16B : &FONT_T12;
+			lcd_rrect(l, sp.x0, by, bw2, wd->size, 4, C_TRACK);
+			if (fw >= 4) lcd_rrect(l, sp.x0, by, fw, wd->size, 4, col);
+			lcd_draw(l, f, (sp.x0 + sp.x1 + 1) / 2 - lcd_text_w(f, buf, 1) / 2, by + (wd->size - f->h) / 2, buf, C_WHITE, LCD_TRANSPARENT, 1);
+		} else {
+			/* slim, resource-style: percent value, so the bar gets the room (dBm is on dbm/tall) */
+			char val[8];
+			snprintf(val, sizeof(val), "%d%%", p);
+			draw_bar_row(l, sp, y, h, c->row_step ? 12 : wd->size, "Signal", p, val, col);
+		}
+		break;
+	}
 	case W_CLIENTS: {
 		const font_t *f = LADDER[ladder_index(wd->size)];
 		int sc = wd->size >= 32 ? 2 : 1, iw = 16 * sc;
@@ -976,8 +1024,18 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		break;
 	}
 	case W_UPTIME:
-		fmt_uptime(s->uptime, buf, sizeof(buf));
-		row_text(l, sp, y, h, wd->size, "Uptime", buf, C_WHITE, 0, NULL, 0, &c->row_step);
+		if (sp.x1 - sp.x0 + 1 < 90) {
+			/* shared line: the label does not fit, a clock icon takes its place */
+			fmt_uptime_short(s->uptime, buf, sizeof(buf));
+			const font_t *f = wd->size >= 16 && lcd_text_w(&FONT_T16B, buf, 1) + 20 <= sp.x1 - sp.x0 + 1 ? &FONT_T16B : &FONT_T12;
+			int tw = lcd_text_w(f, buf, 1), icon = 16 + 4 + tw <= sp.x1 - sp.x0 + 1;   /* no room: value only */
+			int x = (sp.x0 + sp.x1 + 1) / 2 - ((icon ? 20 : 0) + tw) / 2;
+			if (l && icon) draw_clock(l, x, y + (h - 16) / 2, C_WHITE);
+			lcd_draw(l, f, x + (icon ? 20 : 0), y + (h - f->h) / 2, buf, C_WHITE, LCD_TRANSPARENT, 1);
+		} else {
+			fmt_uptime(s->uptime, buf, sizeof(buf));
+			row_text(l, sp, y, h, wd->size, "Uptime", buf, C_WHITE, 0, NULL, 0, &c->row_step);
+		}
 		break;
 	case W_RULE:
 		lcd_fill(l, sp.x0, y + h / 2 - 1, sp.x1 - sp.x0 + 1, 2, C_RULE);
