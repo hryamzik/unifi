@@ -537,7 +537,7 @@ static void conf_line(config_t *c, char *line)
 					specs[n].showval = colon && strchr(colon, 'v') ? 1 : 0;   /* speeddn:12v: total speed written on the bar */
 					specs[n].peak = colon && strchr(colon, 'p') ? 1 : 0;   /* legend:4b4p: bar scaled by the peak rate seen, not the current max */
 					specs[n].split = colon && strchr(colon, 'x') ? 1 : 0;   /* legend:4b4x: bar split into upload (thin, top) and download */
-					specs[n].graph = colon && strchr(colon, 'G') ? 1 : 0;   /* cpuram:12G: graphs only (per-core strips + RAM bar), no text */
+					specs[n].graph = colon && strchr(colon, 'G') ? (strchr(colon, 'H') ? 2 : 1) : 0;   /* cpuram:12G graphs + percents, 12GH graphs only */
 					specs[n].fit = colon && strchr(colon, 'F') ? 2 : colon && strchr(colon, 'f') ? 1 : 0;   /* legend fit: f gentle, F compact */
 					if (colon) {   /* legend background: b0..b5 (none speed total signal signal+speed signal+total) */
 						const char *b = strchr(colon, 'b');
@@ -1131,24 +1131,35 @@ static void draw_resource(lcd_t *l, span_t sp, int y, int h, int size, const cha
  * not a stack of resource rows the aligned label column of draw_bar_row just wastes room. */
 static void draw_cpuram(lcd_t *l, span_t sp, int y, int h, int size, const res_t *r, int graph)
 {
-	if (graph) {          /* no text: CPU as one strip per core, RAM as one bar, same two halves */
-		int mid = (sp.x0 + sp.x1 + 1) / 2, x0 = sp.x0, x1 = mid - 4, x2 = mid + 3;
-		if (r->ncores > 0) {
-			int n = r->ncores, sh = (size - (n - 1)) / n, by = y + (h - (sh * n + (n - 1))) / 2;
-			if (sh < 2) sh = 2;
-			for (int i = 0; i < n; i++) {
-				int pct = r->core[i] > 100 ? 100 : r->core[i], bw = x1 + 1 - x0;
-				lcd_fill(l, x0, by + i * (sh + 1), bw, sh, C_TRACK);
-				if (bw * pct / 100 >= 2) lcd_fill(l, x0, by + i * (sh + 1), bw * pct / 100, sh, pct < 50 ? C_OK : pct < 80 ? C_WARN : C_BAD);
+	if (graph) {          /* graphs: CPU as one strip per core, RAM as one bar; percents too unless graph == 2 */
+		const font_t *vf = size >= 16 ? &FONT_T16B : &FONT_T12;
+		int mid = (sp.x0 + sp.x1 + 1) / 2, bh = size >= 16 ? 8 : 6;
+		const struct { int pct, x0, x1, okb, wb; } half[2] = {
+			{ r->cpu, sp.x0, mid - 4, 60, 85 }, { r->ram, mid + 3, sp.x1, 80, 90 } };
+		for (int k = 0; k < 2; k++) {
+			int gx1 = half[k].x1;
+			if (graph == 1) {          /* percent at the right of the half, graph in what remains */
+				char val[8];
+				snprintf(val, sizeof(val), "%d%%", half[k].pct);
+				int vw = lcd_text_w(vf, val, 1);
+				lcd_draw(l, vf, half[k].x1 + 1 - vw, y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
+				gx1 -= vw + 3;
 			}
-		} else {
-			int bh = size >= 16 ? 8 : 6, pct = r->cpu > 100 ? 100 : r->cpu;
-			lcd_rrect(l, x0, y + (h - bh) / 2, x1 + 1 - x0, bh, 3, C_TRACK);
-			if ((x1 + 1 - x0) * pct / 100 >= 3) lcd_rrect(l, x0, y + (h - bh) / 2, (x1 + 1 - x0) * pct / 100, bh, 3, pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD);
+			int bw = gx1 + 1 - half[k].x0, pct = half[k].pct > 100 ? 100 : half[k].pct;
+			if (bw < 8) continue;
+			if (k == 0 && r->ncores > 0) {
+				int n = r->ncores, sh = (size - (n - 1)) / n, by = y + (h - (sh * n + (n - 1))) / 2;
+				if (sh < 2) sh = 2;
+				for (int i = 0; i < n; i++) {
+					int cp = r->core[i] > 100 ? 100 : r->core[i];
+					lcd_fill(l, half[k].x0, by + i * (sh + 1), bw, sh, C_TRACK);
+					if (bw * cp / 100 >= 2) lcd_fill(l, half[k].x0, by + i * (sh + 1), bw * cp / 100, sh, cp < 50 ? C_OK : cp < 80 ? C_WARN : C_BAD);
+				}
+			} else {
+				lcd_rrect(l, half[k].x0, y + (h - bh) / 2, bw, bh, 3, C_TRACK);
+				if (bw * pct / 100 >= 3) lcd_rrect(l, half[k].x0, y + (h - bh) / 2, bw * pct / 100, bh, 3, pct < half[k].okb ? C_OK : pct < half[k].wb ? C_WARN : C_BAD);
+			}
 		}
-		int bh = size >= 16 ? 8 : 6, pct = r->ram > 100 ? 100 : r->ram, bw = sp.x1 + 1 - x2;
-		lcd_rrect(l, x2, y + (h - bh) / 2, bw, bh, 3, C_TRACK);
-		if (bw * pct / 100 >= 3) lcd_rrect(l, x2, y + (h - bh) / 2, bw * pct / 100, bh, 3, pct < 80 ? C_OK : pct < 90 ? C_WARN : C_BAD);
 		return;
 	}
 	const font_t *lf = size >= 16 ? &FONT_T16 : &FONT_T12, *vf = size >= 16 ? &FONT_T16B : &FONT_T12;

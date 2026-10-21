@@ -127,13 +127,13 @@ function parseWidget(str) {
 	 * after the size: w wrap, s shrink (ssid), b0..b5 legend bg, f/F fit, c per-core, l/g/n/i uplinks, v speed value,
 	 * p legend peak scaling, x legend split up/down bar */
 	return [p[0], size, false, /w/.test(o), /s/.test(o), bg ? +bg[1] : 0, /F/.test(o) ? 2 : /f/.test(o) ? 1 : 0,
-		/r/.test(o) ? 2 : /c/.test(o) ? 1 : 0, /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o), /v/.test(o), /p/.test(o), /x/.test(o), /G/.test(o)];
+		/r/.test(o) ? 2 : /c/.test(o) ? 1 : 0, /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o), /v/.test(o), /p/.test(o), /x/.test(o), /G/.test(o) ? (/H/.test(o) ? 2 : 1) : 0];
 }
 
 function widgetSpec(w) {
 	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '') +
 		(w[5] ? 'b' + w[5] : '') + (w[6] === 2 ? 'F' : w[6] === 1 ? 'f' : '') + (w[7] === 2 ? 'r' : w[7] ? 'c' : '') + (w[8] ? 'l' : '') + (w[9] ? 'g' : '') +
-		(w[10] ? 'n' : '') + (w[11] ? 'i' : '') + (w[12] ? 'v' : '') + (w[13] ? 'p' : '') + (w[14] ? 'x' : '') + (w[15] ? 'G' : '');
+		(w[10] ? 'n' : '') + (w[11] ? 'i' : '') + (w[12] ? 'v' : '') + (w[13] ? 'p' : '') + (w[14] ? 'x' : '') + (w[15] === 2 ? 'GH' : w[15] === 1 ? 'G' : '');
 }
 
 /* One config item: "type:size" or several joined by '+' for one shared line. */
@@ -329,7 +329,7 @@ return view.extend({
 					])
 				]);
 			if (w[0] === 'cpuram')
-				return E('td', {}, check(!!w[15], function(v) { w[15] = v; redraw(); }, _('Graphs only (no labels)')));
+				return E('td', {}, select([ [ '0', _('Labels + bars + %') ], [ '1', _('Graphs + %') ], [ '2', _('Graphs only') ] ], w[15] || 0, function(v) { w[15] = +v; redraw(); }, { 'style': 'width:100%; max-width:11em' }));
 			if (w[0] === 'cpu')
 				return E('td', {}, select([ [ '0', _('Bar: total') ], [ '1', _('Bar: per-core segments') ], [ '2', _('Bar: per-core rows') ] ], w[7] || 0, function(v) { w[7] = +v; redraw(); }, { 'style': 'width:100%; max-width:11em' }));
 			if (w[0] === 'uplinks')
@@ -349,7 +349,7 @@ return view.extend({
 			var joinFull = !w[2] && groupSize(sc.widgets, wi) >= 3;
 			return E('tr', {}, [
 				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
-					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = 0; w[8] = false; w[9] = false; w[10] = false; w[11] = false; w[12] = false; w[13] = false; w[14] = false; w[15] = false; redraw();
+					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = 0; w[8] = false; w[9] = false; w[10] = false; w[11] = false; w[12] = false; w[13] = false; w[14] = false; w[15] = 0; redraw();
 				}, { 'style': 'width:100%; max-width:13em' })),
 				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
 					'checked': w[2] ? '' : null, 'disabled': (wi === sc.widgets.length - 1 || joinFull) ? '' : null,
