@@ -36,9 +36,15 @@ var TYPES = {
 	uptime:      { label: 'Uptime',                group: 'general', sizes: [12, 16], def: 16 },
 	rule:        { label: 'Divider line',          group: 'general', sizes: null, def: 2 },
 	speed:       { label: 'Speed down / up',       group: 'traffic', sizes: [16, 24], def: 24 },
+	speed1:      { label: 'Speed down+up (one line)', group: 'traffic', sizes: [16], def: 16 },
 	speedbar:    { label: 'Speed by client (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
+	speeddn:     { label: 'Download by client (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
+	speedup:     { label: 'Upload by client (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
 	usage:       { label: 'Total traffic',         group: 'traffic', sizes: [12, 16], def: 16 },
 	usagebar:    { label: 'Total by client (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
+	usagedn:     { label: 'Downloaded total (bar, total inside)', group: 'traffic', sizes: [16, 24], def: 16 },
+	usageup:     { label: 'Uploaded total (bar, total inside)', group: 'traffic', sizes: [16, 24], def: 16 },
+	uplinks:     { label: 'Uplinks (icons, mwan3)', group: 'traffic', sizes: [16, 24], def: 24 },
 	legend:      { label: 'Clients, speed',        group: 'traffic', sizes: [1, 2, 3, 4, 5, 6, 7, 8], def: 4, unit: 'rows' },
 	legendtotal: { label: 'Clients, total',        group: 'traffic', sizes: [1, 2, 3, 4, 5, 6, 7, 8], def: 4, unit: 'rows' },
 	donut:       { label: 'Speed by client (ring)', group: 'traffic', sizes: [48, 64, 80, 96], def: 80, unit: 'px' },
@@ -46,6 +52,7 @@ var TYPES = {
 	cpu:         { label: 'CPU load',              group: 'resources', sizes: [12, 16], def: 16 },
 	ram:         { label: 'Memory',                group: 'resources', sizes: [12, 16], def: 16 },
 	flash:       { label: 'Flash storage',         group: 'resources', sizes: [12, 16], def: 16 },
+	load:        { label: 'Load average',          group: 'resources', sizes: [12, 16], def: 16 },
 	temp:        { label: 'Wi-Fi chip temperature', group: 'resources', sizes: [12, 16], def: 16 }
 };
 
@@ -55,14 +62,15 @@ var DEFAULT_SCREENS = [
 	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, backfill: true,
 	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
 	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, backfill: true,
-	  widgets: [ ['wanip', 16], ['lanip', 16], ['vpn', 16], ['uptime', 16], ['cpu', 16], ['ram', 16], ['flash', 16], ['temp', 16] ] }
+	  widgets: [ ['wanip', 16], ['lanip', 16], ['vpn', 16], ['uptime', 16], ['cpu', 16], ['ram', 16], ['flash', 16], ['load', 16], ['temp', 16] ] }
 ];
 
 /* Height in pixels a widget needs (the same table as widget_h in lcd-status.c; widgets with nothing to
  * show right now take no room, so this is the worst case). */
-function widgetHeight(type, size, wrap) {
+function widgetHeight(type, size, wrap, w) {
 	size = +size;
 	if (type === 'ssid' && wrap) return 2 * size + 2;   /* wrapped name may take a second line */
+	if (type === 'uplinks') return w && w[8] ? 2 * size + 10 : size + 22;   /* inline rows: worst case 2 uplinks; else icon+label+lines */
 	switch (type) {
 	case 'rule': return 6;
 	case 'speed': return 2 * (size + 2);
@@ -82,7 +90,7 @@ function availableHeight() {
 function lineHeights(widgets) {
 	var lines = [], cur = 0;
 	widgets.forEach(function(w, i) {
-		cur = Math.max(cur, widgetHeight(w[0], w[1], w[3]));
+		cur = Math.max(cur, widgetHeight(w[0], w[1], w[3], w));
 		if (!w[2] || i === widgets.length - 1) { lines.push(cur); cur = 0; }
 	});
 	return lines;
@@ -108,11 +116,16 @@ function parseWidget(str) {
 	if (!t) return null;
 	var size = parseInt(p[1], 10);
 	if (!size || (t.sizes && t.sizes.indexOf(size) < 0)) size = t.def;
-	return [p[0], size, false, /w/.test(p[1] || ''), /s/.test(p[1] || '')];   /* 4th: wrap to two lines (ssid:24w); 5th: shrink to fit (ssid:24ws) */
+	var o = p[1] || '', bg = /b([0-5])/.exec(o);
+	/* [type, size, join, wrap, shrink, bg, fit, cores, inline, generic] - flags after the size:
+	 * w wrap, s shrink (ssid), b0..b5 legend background, f/F legend fit, c per-core (cpu), l/g uplinks layout/label */
+	return [p[0], size, false, /w/.test(o), /s/.test(o), bg ? +bg[1] : 0, /F/.test(o) ? 2 : /f/.test(o) ? 1 : 0,
+		/c/.test(o), /l/.test(o), /g/.test(o)];
 }
 
 function widgetSpec(w) {
-	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '');
+	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '') + (w[7] ? 'c' : '') +
+		(w[5] ? 'b' + w[5] : '') + (w[6] === 2 ? 'F' : w[6] === 1 ? 'f' : '') + (w[8] ? 'l' : '') + (w[9] ? 'g' : '');
 }
 
 /* One config item: "type:size" or several joined by '+' for one shared line. */
@@ -295,12 +308,29 @@ return view.extend({
 			var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
 		}
 
+		function optionsCell(sc, wi) {
+			var w = sc.widgets[wi];
+			if (w[0] === 'legend' || w[0] === 'legendtotal')
+				return E('td', {}, [
+					select([ [ '0', _('Background: none') ], [ '1', _('Background: speed') ], [ '2', _('Background: total') ], [ '3', _('Background: signal') ], [ '4', _('Background: signal + speed') ], [ '5', _('Background: signal + total') ] ], w[5] || 0, function(v) { w[5] = +v; redraw(); }, { 'style': 'width:100%; max-width:11em' }),
+					select([ [ '0', _('Fit: off') ], [ '1', _('Fit: gentle') ], [ '2', _('Fit: compact') ] ], w[6] || 0, function(v) { w[6] = +v; redraw(); }, { 'style': 'width:100%; max-width:9em; margin-top:2px' })
+				]);
+			if (w[0] === 'cpu')
+				return E('td', {}, check(!!w[7], function(v) { w[7] = v; redraw(); }, _('Per-core bar')));
+			if (w[0] === 'uplinks')
+				return E('td', {}, [
+					check(!!w[8], function(v) { w[8] = v; redraw(); }, _('Icon beside name')),
+					check(!!w[9], function(v) { w[9] = v; redraw(); }, _('Short names (WiFi/Eth)'))
+				]);
+			return E('td', {}, E('span', { 'style': 'opacity:.6' }, '-'));
+		}
+
 		function widgetRow(sc, wi) {
 			var w = sc.widgets[wi], t = TYPES[w[0]];
 			var joinFull = !w[2] && groupSize(sc.widgets, wi) >= 3;
 			return E('tr', {}, [
 				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
-					w[0] = v; w[1] = TYPES[v].def; redraw();
+					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = false; w[8] = false; w[9] = false; redraw();
 				}, { 'style': 'width:100%; max-width:13em' })),
 				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
 					'checked': w[2] ? '' : null, 'disabled': (wi === sc.widgets.length - 1 || joinFull) ? '' : null,
@@ -311,10 +341,11 @@ return view.extend({
 				E('td', { 'style': 'text-align:center' }, w[0] === 'ssid' ? E('input', { 'type': 'checkbox', 'title': _('If the name still does not fit (on two lines when wrapping), reduce the font size step by step until it does'),
 					'checked': w[4] ? '' : null,
 					'change': function() { w[4] = this.checked; redraw(); } }) : E('span', { 'style': 'opacity:.6' }, '-')),
+				optionsCell(sc, wi),
 				E('td', {}, t.sizes ? select(t.sizes.map(function(s) { return [ s, sizeLabel(t, s) ]; }), w[1], function(v) {
 					w[1] = +v; redraw();
 				}) : E('span', { 'style': 'opacity:.6' }, '-')),
-				E('td', { 'style': 'text-align:right; opacity:.7; white-space:nowrap' }, widgetHeight(w[0], w[1], w[3]) + ' px'),
+				E('td', { 'style': 'text-align:right; opacity:.7; white-space:nowrap' }, widgetHeight(w[0], w[1], w[3], w) + ' px'),
 				E('td', { 'style': 'white-space:nowrap' }, [
 					btn('\u2191', function() { move(sc.widgets, wi, -1); redraw(); }, wi === 0, _('Move up')),
 					btn('\u2193', function() { move(sc.widgets, wi, 1); redraw(); }, wi === sc.widgets.length - 1, _('Move down')),
@@ -386,7 +417,7 @@ return view.extend({
 			if (!sc._folded) parts.push(E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start' }, [
 					E('div', { 'style': 'flex:1 1 300px; min-width:0' }, [
 						sc.widgets.length ? E('div', { 'style': 'overflow-x:auto' }, E('table', { 'class': 'table', 'style': 'width:100%' }, [
-							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Join next')), E('th', { 'class': 'th' }, _('Wrap')), E('th', { 'class': 'th' }, _('Shrink')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
+							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Join next')), E('th', { 'class': 'th' }, _('Wrap')), E('th', { 'class': 'th' }, _('Shrink')), E('th', { 'class': 'th' }, _('Options')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
 						].concat(sc.widgets.map(function(_w, wi) { return widgetRow(sc, wi); })))) : E('em', {}, _('Nothing on this screen yet.')),
 						E('div', { 'style': 'margin-top:8px' }, addSel),
 						meter,

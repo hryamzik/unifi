@@ -75,6 +75,8 @@ typedef struct {
 	int valid;
 	int nups;                                  /* uplinks, lowest metric first (ups[0] is the one in up_*) */
 	struct { char dev[16], type[16], name[64]; int signal, has_signal, speed, metric; } ups[3];
+	int nmw;                                   /* mwan3 interfaces (from ubus status via collect.sh), if any */
+	struct { char ifname[16], dev[16], state[12]; int pct; } mw[3];   /* pct: share in the default policy, -1 = unknown */
 } status_t;
 
 static void collect_parse(status_t *s, char *line)
@@ -96,6 +98,16 @@ static void collect_parse(status_t *s, char *line)
 	else if (!strcmp(line, "clients")) s->clients = atoi(eq);
 	else if (!strcmp(line, "uptime")) s->uptime = atol(eq);
 	else if (!strcmp(line, "ups")) s->nups = atoi(eq) > 3 ? 3 : atoi(eq);
+	else if (!strcmp(line, "mws")) s->nmw = atoi(eq) > 3 ? 3 : atoi(eq);
+	else if (!strncmp(line, "mw", 2) && line[2] >= '0' && line[2] <= '2' && line[3] == '_') {
+		int n = line[2] - '0';
+		const char *k = line + 4;
+		if (!strcmp(k, "if")) copy(s->mw[n].ifname, sizeof(s->mw[n].ifname), eq);
+		else if (!strcmp(k, "dev")) copy(s->mw[n].dev, sizeof(s->mw[n].dev), eq);
+		else if (!strcmp(k, "state")) copy(s->mw[n].state, sizeof(s->mw[n].state), eq);
+		else if (!strcmp(k, "pct")) s->mw[n].pct = atoi(eq);
+		else return;
+	}
 	else if (!strncmp(line, "up", 2) && line[2] >= '0' && line[2] <= '2' && line[3] == '_') {
 		int n = line[2] - '0';
 		const char *k = line + 4;
@@ -128,6 +140,7 @@ static void coll_start(collector_t *c, const char *cmd)
 	c->fd = fileno(c->p);
 	c->len = 0;
 	memset(&c->next, 0, sizeof(c->next));
+	for (int i = 0; i < 3; i++) c->next.mw[i].pct = -1;
 }
 
 /* Returns 1 when a complete result is in *out. */
@@ -163,8 +176,8 @@ static int coll_poll(collector_t *c, status_t *out)
 
 #define MAX_CL 24
 #define TRAFFIC_COLORS 12
-typedef struct { char id[24], name[32]; double rate, total; int online, color; } cl_t;
-typedef struct { char dev[16]; double down, up; } upl_t;
+typedef struct { char id[24], name[32]; double rate, total; double drate, urate, dtot, utot; int online, color; int signal, has_signal; } cl_t;
+typedef struct { char dev[16]; double down, up, dtot, utot; } upl_t;
 typedef struct { int valid; double down, up, dtot, utot; cl_t c[MAX_CL]; int n; upl_t u[3]; int nu; } traffic_t;
 
 static const uint32_t PALETTE[TRAFFIC_COLORS] = {
@@ -218,19 +231,34 @@ static void traffic_load(traffic_t *t, const char *path)
 		else if (!strcmp(line, "down_total")) t->dtot = atof(eq);
 		else if (!strcmp(line, "up_total")) t->utot = atof(eq);
 		else if (!strcmp(line, "uplink") && t->nu < 3) {
-			char *f1 = strtok(eq, "|"), *f2 = strtok(NULL, "|"), *f3 = strtok(NULL, "|");
+			char *f1 = strtok(eq, "|"), *f2 = strtok(NULL, "|"), *f3 = strtok(NULL, "|"), *f4 = strtok(NULL, "|"), *f5 = strtok(NULL, "|");
 			if (!f1 || !f2 || !f3) continue;
 			copy(t->u[t->nu].dev, sizeof(t->u[t->nu].dev), f1);
 			t->u[t->nu].down = atof(f2); t->u[t->nu].up = atof(f3);
+			if (f4) t->u[t->nu].dtot = atof(f4);
+			if (f5) t->u[t->nu].utot = atof(f5);
 			t->nu++;
 		}
 		else if (!strcmp(line, "client") && t->n < MAX_CL) {
 			cl_t *c = &t->c[t->n];
-			char *f1 = strtok(eq, "|"), *f2 = strtok(NULL, "|"), *f3 = strtok(NULL, "|"), *f4 = strtok(NULL, "|"), *f5 = strtok(NULL, "|");
-			if (!f1 || !f2 || !f3 || !f4 || !f5) continue;
-			copy(c->id, sizeof(c->id), f1);
-			copy(c->name, sizeof(c->name), f2);
-			c->rate = atof(f3); c->total = atof(f4); c->online = atoi(f5);
+			char *fld[10] = { 0 };
+			int nf = 0;
+			for (char *cur = eq; nf < 10; ) {          /* split on '|', keeping empty fields */
+				fld[nf++] = cur;
+				char *sep = strchr(cur, '|');
+				if (!sep) break;
+				*sep = 0; cur = sep + 1;
+			}
+			if (nf < 5) continue;
+			copy(c->id, sizeof(c->id), fld[0]);
+			copy(c->name, sizeof(c->name), fld[1]);
+			c->rate = atof(fld[2]); c->total = atof(fld[3]); c->online = atoi(fld[4]);
+			/* optional: signal dBm (empty = none), down/up bps, down/up bytes */
+			if (nf > 5 && *fld[5]) { c->has_signal = 1; c->signal = atoi(fld[5]); }
+			if (nf > 6) c->drate = atof(fld[6]);
+			if (nf > 7) c->urate = atof(fld[7]);
+			if (nf > 8) c->dtot = atof(fld[8]);
+			if (nf > 9) c->utot = atof(fld[9]);
 			t->n++;
 		}
 	}
@@ -238,17 +266,32 @@ static void traffic_load(traffic_t *t, const char *path)
 	traffic_colors(t);
 }
 
-/* Indices of the clients by metric, largest first; only those with something to show. */
-static int traffic_rank(const traffic_t *t, int by_total, int *idx)
+/* Bar/legend metrics: combined or one direction, rates or byte totals. */
+enum { BM_RATE, BM_TOTAL, BM_DRATE, BM_URATE, BM_DTOTAL, BM_UTOTAL };
+static double client_val(const cl_t *c, int mode)
 {
+	switch (mode) {
+	case BM_DRATE: return c->drate;
+	case BM_URATE: return c->urate;
+	case BM_DTOTAL: return c->dtot;
+	case BM_UTOTAL: return c->utot;
+	case BM_TOTAL: return c->total;
+	default: return c->rate;
+	}
+}
+
+/* Indices of the clients by metric, largest first; only those with something to show. */
+static int traffic_rank_m(const traffic_t *t, int mode, int *idx)
+{
+	int by_total = mode == BM_TOTAL || mode == BM_DTOTAL || mode == BM_UTOTAL;
 	int n = 0;
 	for (int i = 0; i < t->n; i++) {
-		double v = by_total ? t->c[i].total : t->c[i].rate;
+		double v = client_val(&t->c[i], mode);
 		if (v <= 0 && !(by_total ? 0 : t->c[i].online)) continue;
 		int j = n++;
 		while (j > 0) {
 			const cl_t *a = &t->c[idx[j - 1]], *b = &t->c[i];
-			double av = by_total ? a->total : a->rate, bv = by_total ? b->total : b->rate;
+			double av = client_val(a, mode), bv = client_val(b, mode);
 			if (av > bv || (av == bv && a->total >= b->total)) break;
 			idx[j] = idx[j - 1];
 			j--;
@@ -257,6 +300,7 @@ static int traffic_rank(const traffic_t *t, int by_total, int *idx)
 	}
 	return n;
 }
+static int traffic_rank(const traffic_t *t, int by_total, int *idx) { return traffic_rank_m(t, by_total ? BM_TOTAL : BM_RATE, idx); }
 
 /* Speed as a number and a unit, e.g. 12.5 + "Mb/s". */
 static void fmt_rate(double bps, char *num, size_t n, const char **unit)
@@ -291,19 +335,40 @@ static void fmt_bytes(double v, char *out, size_t n)
 
 /* ------------------------------------------------------------------------------------- resources */
 
-typedef struct { int valid, cpu, ram, flash, temp; } res_t;     /* percent; temp in degrees C, -1 = no sensor */
-typedef struct { unsigned long long total, idle; int have; } cpu_prev_t;
+typedef struct { int valid, cpu, ram, flash, temp; int load[3]; int core[8], ncores; } res_t;     /* percent; temp C, -1 = none; load in hundredths */
+typedef struct { unsigned long long total, idle; int have; unsigned long long ctot[8], cidle[8]; int chave[8]; } cpu_prev_t;
 
 static void res_sample(res_t *r, cpu_prev_t *cp)
 {
 	FILE *f = fopen("/proc/stat", "r");
-	unsigned long long v[8] = { 0 };
 	if (f) {
-		if (fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu %llu", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]) >= 4) {
+		char line[256];
+		r->ncores = 0;
+		while (fgets(line, sizeof(line), f)) {
+			unsigned long long v[8] = { 0 };
+			int agg = !strncmp(line, "cpu ", 4), core = -1;
+			if (!agg && sscanf(line, "cpu%d", &core) != 1) continue;
+			const char *p = strchr(line, ' ');
+			if (!p || sscanf(p, "%llu %llu %llu %llu %llu %llu %llu %llu", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7]) < 4) continue;
 			unsigned long long tot = 0, idle = v[3] + v[4];
 			for (int i = 0; i < 8; i++) tot += v[i];
-			if (cp->have && tot > cp->total) r->cpu = (int)(100 - (idle - cp->idle) * 100 / (tot - cp->total));
-			cp->total = tot; cp->idle = idle; cp->have = 1;
+			if (agg) {
+				if (cp->have && tot > cp->total) r->cpu = (int)(100 - (idle - cp->idle) * 100 / (tot - cp->total));
+				cp->total = tot; cp->idle = idle; cp->have = 1;
+			} else if (core >= 0 && core < 8) {
+				if (core + 1 > r->ncores) r->ncores = core + 1;
+				if (cp->chave[core] && tot > cp->ctot[core]) r->core[core] = (int)(100 - (idle - cp->cidle[core]) * 100 / (tot - cp->ctot[core]));
+				if (r->core[core] < 0) r->core[core] = 0;
+				cp->ctot[core] = tot; cp->cidle[core] = idle; cp->chave[core] = 1;
+			}
+		}
+		fclose(f);
+	}
+	f = fopen("/proc/loadavg", "r");
+	if (f) {
+		double l1, l5, l15;
+		if (fscanf(f, "%lf %lf %lf", &l1, &l5, &l15) == 3) {
+			r->load[0] = (int)(l1 * 100 + 0.5); r->load[1] = (int)(l5 * 100 + 0.5); r->load[2] = (int)(l15 * 100 + 0.5);
 		}
 		fclose(f);
 	}
@@ -340,8 +405,8 @@ static void res_sample(res_t *r, cpu_prev_t *cp)
 /* ---------------------------------------------------------------------------------- configuration */
 
 enum { W_SSID, W_DBM, W_BARS, W_SIGBAR, W_FAN, W_SEGBAR, W_STATUS, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
-       W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
-       W_CPU, W_RAM, W_FLASH, W_TEMP, W_MULTIWAN, W_ROW, W_NTYPES };
+       W_SPEED, W_SPEED1, W_SPEEDBAR, W_SPEEDDN, W_SPEEDUP, W_USAGE, W_USAGEBAR, W_USAGEDN, W_USAGEUP, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
+       W_CPU, W_RAM, W_FLASH, W_LOAD, W_TEMP, W_MULTIWAN, W_UPLINKS, W_ROW, W_NTYPES };
 enum { ST_DOT, ST_PILL, ST_NONE };   /* legacy "indicator" config values, parsed but no longer drawn */
 
 typedef struct { const char *name; int def_size; } wtype_t;
@@ -361,7 +426,12 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_UPTIME]  = { "uptime", 16 },
 	[W_RULE]    = { "rule", 2 },
 	[W_SPEED]   = { "speed", 24 },          /* down and up speed, two lines; size 16 or 24 */
+	[W_SPEED1]  = { "speed1", 16 },         /* down and up speed on one line */
 	[W_SPEEDBAR] = { "speedbar", 12 },      /* current speed split by client, size = bar height 8/12/16 */
+	[W_SPEEDDN] = { "speeddn", 12 },        /* download speed split by client */
+	[W_SPEEDUP] = { "speedup", 12 },        /* upload speed split by client */
+	[W_USAGEDN] = { "usagedn", 16 },        /* downloaded bytes split by client, total inside the bar (16/24) */
+	[W_USAGEUP] = { "usageup", 16 },        /* uploaded bytes split by client, total inside the bar (16/24) */
 	[W_USAGE]   = { "usage", 16 },          /* total traffic since the sampler started */
 	[W_USAGEBAR] = { "usagebar", 12 },      /* total traffic split by client */
 	[W_LEGEND]  = { "legend", 4 },          /* size = number of client rows; colour, name, current speed */
@@ -370,7 +440,9 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_CPU]     = { "cpu", 16 },            /* resource rows: label, bar, percent; size 12 or 16 */
 	[W_RAM]     = { "ram", 16 },
 	[W_FLASH]   = { "flash", 16 },
+	[W_LOAD]    = { "load", 16 },           /* load average; bar scaled to the core count */
 	[W_MULTIWAN] = { "multiwan", 16 },      /* share of traffic per uplink (hidden with a single uplink); size 12 or 16 */
+	[W_UPLINKS] = { "uplinks", 24 },        /* uplink icons + state (mwan3 when available); never hidden; size = icon 16 or 24 */
 	[W_TEMP]    = { "temp", 16 },           /* Wi-Fi chip temperature (hidden when there is no sensor) */
 };
 
@@ -379,8 +451,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_PLAYLIST 32
 
 #define MAX_SUB 3
-typedef struct { int type, size, wrap, shrink; } wspec_t;
-typedef struct { int type, size, wrap, shrink; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic; } wspec_t;   /* bg/fit: legend; cores: cpu; layout/generic: uplinks */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill;
@@ -405,7 +477,7 @@ static const char DEFAULT_CONF[] =
 	"widget=usagebar:12\nwidget=legend:4\n"
 	"screen=Details\ndwell=5\nbackfill=1\n"
 	"widget=wanip:16\nwidget=lanip:16\nwidget=vpn:16\nwidget=uptime:16\n"
-	"widget=cpu:16\nwidget=ram:16\nwidget=flash:16\nwidget=temp:16\n";
+	"widget=cpu:16\nwidget=ram:16\nwidget=flash:16\nwidget=load:16\nwidget=temp:16\n";
 
 static void conf_line(config_t *c, char *line)
 {
@@ -454,6 +526,14 @@ static void conf_line(config_t *c, char *line)
 					specs[n].size = size > 0 ? size : WTYPES[t].def_size;
 					specs[n].wrap = colon && strchr(colon, 'w') ? 1 : 0;   /* e.g. ssid:24w wraps to 2 lines */
 					specs[n].shrink = colon && strchr(colon, 's') ? 1 : 0;   /* ssid:24ws: then step the font down until it fits */
+					specs[n].cores = colon && strchr(colon, 'c') ? 1 : 0;   /* cpu:16c: bar split per core */
+					specs[n].layout = colon && strchr(colon, 'l') ? 1 : 0;   /* uplinks:24l: icon beside the label, not above */
+					specs[n].generic = colon && strchr(colon, 'g') ? 1 : 0;   /* uplinks:24g: label is WiFi/Eth, not the network name */
+					specs[n].fit = colon && strchr(colon, 'F') ? 2 : colon && strchr(colon, 'f') ? 1 : 0;   /* legend fit: f gentle, F compact */
+					if (colon) {   /* legend background: b0..b5 (none speed total signal signal+speed signal+total) */
+						const char *b = strchr(colon, 'b');
+						if (b && b[1] >= '0' && b[1] <= '5') specs[n].bg = b[1] - '0';
+					}
 					n++;
 					break;
 				}
@@ -463,6 +543,11 @@ static void conf_line(config_t *c, char *line)
 			s->w[s->nw].size = specs[0].size;
 			s->w[s->nw].wrap = specs[0].wrap;
 			s->w[s->nw].shrink = specs[0].shrink;
+			s->w[s->nw].bg = specs[0].bg;
+			s->w[s->nw].fit = specs[0].fit;
+			s->w[s->nw].cores = specs[0].cores;
+			s->w[s->nw].layout = specs[0].layout;
+			s->w[s->nw].generic = specs[0].generic;
 			s->nw++;
 		} else if (n > 1) {
 			widget_t *wd = &s->w[s->nw++];
@@ -687,13 +772,13 @@ static void draw_tri(lcd_t *l, int x, int y, int down, uint32_t c)
 #define BAR_MAX 6
 
 /* Share bar: one segment per client in its colour (largest BAR_MAX, the rest grey), no text on it. */
-static void draw_share_bar(lcd_t *l, const traffic_t *t, int by_total, int x, int y, int w, int h)
+static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int y, int w, int h)
 {
-	int idx[MAX_CL], n = traffic_rank(t, by_total, idx), k = 0;
+	int idx[MAX_CL], n = traffic_rank_m(t, mode, idx), k = 0;
 	double vals[BAR_MAX + 1], tot = 0, others = 0;
 	uint32_t cols[BAR_MAX + 1];
 	for (int i = 0; i < n; i++) {
-		double v = by_total ? t->c[idx[i]].total : t->c[idx[i]].rate;
+		double v = client_val(&t->c[idx[i]], mode);
 		if (v <= 0) continue;
 		if (k < BAR_MAX) { vals[k] = v; cols[k] = PALETTE[t->c[idx[i]].color]; k++; }
 		else others += v;
@@ -708,6 +793,24 @@ static void draw_share_bar(lcd_t *l, const traffic_t *t, int by_total, int x, in
 		int x1 = x + (int)(acc / tot * w + 0.5);
 		if (x1 - x0 > 1) lcd_fill(l, x0 + (i ? 1 : 0), y + 1, x1 - x0 - (i ? 1 : 0), h - 2, cols[i]);
 	}
+}
+
+static void draw_share_bar(lcd_t *l, const traffic_t *t, int by_total, int x, int y, int w, int h)
+{
+	draw_share_bar_m(l, t, by_total ? BM_TOTAL : BM_RATE, x, y, w, h);
+}
+
+/* Directional total bar with the total written inside it (down or up bytes). */
+static void draw_total_bar(lcd_t *l, const traffic_t *t, int down, int x, int y, int w, int h)
+{
+	draw_share_bar_m(l, t, down ? BM_DTOTAL : BM_UTOTAL, x, y, w, h);
+	if (!t->valid) return;
+	char val[24];
+	fmt_bytes(down ? t->dtot : t->utot, val, sizeof(val));
+	const font_t *f = h >= 24 ? &FONT_T16B : &FONT_T12;
+	int tw = 18 + lcd_text_w(f, val, 1), x0 = x + (w - tw) / 2, ty = y + (h - f->h) / 2;
+	draw_tri(l, x0, ty + (f->h - 10) / 2, down, RGB(10, 12, 16));
+	lcd_draw(l, f, x0 + 18, ty, val, RGB(10, 12, 16), LCD_TRANSPARENT, 1);
 }
 
 /* Ring split by client; the centre holds the total speed in the largest font that fits inside. */
@@ -755,6 +858,11 @@ static void draw_donut(lcd_t *l, const traffic_t *t, int cx, int cy, int ro)
 
 #define LEGEND_ROW 17
 
+static uint32_t dim_color(uint32_t c, int pct)
+{
+	return RGB(((c >> 16) & 255) * pct / 100, ((c >> 8) & 255) * pct / 100, (c & 255) * pct / 100);
+}
+
 /* Rows to draw for a legend of at most `rows` lines (the last may be "+k others"). */
 static int legend_rows(const traffic_t *t, int by_total, int rows)
 {
@@ -763,38 +871,60 @@ static int legend_rows(const traffic_t *t, int by_total, int rows)
 	return n > rows ? rows : n;
 }
 
-static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_total, int rows, int y, int name_len)
+/* Legend rows: chip, name, value. Optional background bar behind the name (bg: 1 speed,
+ * 2 total, 3 signal, 4 signal+speed, 5 signal+total; the signal part is a bright 1 px line
+ * at the row's bottom edge, the rest a dim bar in the client's colour, widest client = full
+ * width). Optional fit (1 gentle, 2 compact): when clients overflow, squeeze the row pitch,
+ * then (compact only) the font, to show more of them in the same height. */
+static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_total, int rows, int y, int h, int name_len, int bg, int fit)
 {
+	(void)rows;   /* row count comes from h, the height widget_h reserved */
+	static const int PITCH[3] = { 17, 15, 13 };
 	span_t sp = span_for(w, y, LEGEND_ROW);
-	int idx[MAX_CL], n = traffic_rank(t, by_total, idx), r = legend_rows(t, by_total, rows);
+	int idx[MAX_CL], n = traffic_rank(t, by_total, idx);
 	if (n == 0) {
 		lcd_draw(l, &FONT_T16, sp.x0, y, t->valid ? "No clients" : "No data", C_DIM, LCD_TRANSPARENT, 1);
 		return;
 	}
+	int maxstep = fit >= 2 ? 2 : fit == 1 ? 1 : 0, step = 0;
+	while (step < maxstep && n > h / PITCH[step]) step++;
+	int pitch = PITCH[step], r = n > h / pitch ? h / pitch : n;
+	const font_t *nf = step >= 2 ? &FONT_T12 : &FONT_T16, *vf = step >= 2 ? &FONT_T12 : &FONT_T16B;
 	int named = n > r ? r - 1 : n;        /* leave the last row for "+k others" */
+	int bgmode = bg == 1 || bg == 4 ? BM_RATE : bg == 2 || bg == 5 ? BM_TOTAL : 0;
+	double bgmax = 0;
+	if (bgmode) for (int i = 0; i < named; i++) { double v = client_val(&t->c[idx[i]], bgmode); if (v > bgmax) bgmax = v; }
 	char nm[48], val[16];
-	for (int i = 0; i < r; i++, y += LEGEND_ROW) {
-		sp = span_for(w, y, LEGEND_ROW);          /* rows near a corner are narrower */
+	for (int i = 0; i < r; i++, y += pitch) {
+		sp = span_for(w, y, pitch);          /* rows near a corner are narrower */
 		if (i < named) {
 			const cl_t *c = &t->c[idx[i]];
 			fmt_short(by_total ? c->total : c->rate, val, sizeof(val));
-			int vw = lcd_text_w(&FONT_T16B, val, 1), room = sp.x1 + 1 - sp.x0 - 12 - vw - 4;
-			if (room > name_len * 8) room = name_len * 8;
+			int vw = lcd_text_w(vf, val, 1), room = sp.x1 + 1 - sp.x0 - 12 - vw - 4;
+			if (room > (name_len < 12 ? 12 : name_len) * nf->w) room = (name_len < 12 ? 12 : name_len) * nf->w;
 			if (room < 24) nm[0] = 0;                 /* no room for even a short name: chip and value only */
-			else ellipsize(&FONT_T16, c->name, room, 0, nm, sizeof(nm));
-			lcd_rrect(l, sp.x0, y + 4, 8, 8, 2, PALETTE[c->color]);
-			lcd_draw(l, &FONT_T16, sp.x0 + 12, y, nm, C_WHITE, LCD_TRANSPARENT, 1);
-			lcd_draw(l, &FONT_T16B, sp.x1 + 1 - vw, y, val, C_DIM, LCD_TRANSPARENT, 1);
+			else ellipsize(nf, c->name, room, 0, nm, sizeof(nm));
+			if (bgmode && bgmax > 0) {                /* background bar: this client's share of the widest */
+				int bw = (sp.x1 + 1 - sp.x0) * (int)(client_val(c, bgmode) * 100 / bgmax) / 100;
+				if (bw > 0) lcd_fill(l, sp.x0, y, bw, pitch - 1, dim_color(PALETTE[c->color], 34));
+			}
+			if ((bg == 3 || bg == 4 || bg == 5) && c->has_signal)   /* signal: bright 1 px line, length = quality */
+				lcd_fill(l, sp.x0, y + pitch - 2, (sp.x1 + 1 - sp.x0) * sig_pct(c->signal) / 100, 1, PALETTE[c->color]);
+			int cs = step >= 2 ? 6 : 8;
+			lcd_rrect(l, sp.x0, y + (pitch - cs) / 2, cs, cs, 2, PALETTE[c->color]);
+			lcd_draw(l, nf, sp.x0 + 12, y + (pitch - nf->h) / 2, nm, C_WHITE, LCD_TRANSPARENT, 1);
+			lcd_draw(l, vf, sp.x1 + 1 - vw, y + (pitch - vf->h) / 2, val, C_DIM, LCD_TRANSPARENT, 1);
 		} else {
 			double sum = 0;
 			for (int j = named; j < n; j++) sum += by_total ? t->c[idx[j]].total : t->c[idx[j]].rate;
 			char more[24];
 			snprintf(more, sizeof(more), "+%d more", n - named);
 			fmt_short(sum, val, sizeof(val));
-			ellipsize(&FONT_T16, more, sp.x1 + 1 - sp.x0 - 12 - lcd_text_w(&FONT_T16B, val, 1) - 4, 0, nm, sizeof(nm));
-			lcd_rrect(l, sp.x0, y + 4, 8, 8, 2, C_OTHER);
-			lcd_draw(l, &FONT_T16, sp.x0 + 12, y, nm, C_DIM, LCD_TRANSPARENT, 1);
-			lcd_draw(l, &FONT_T16B, sp.x1 + 1 - lcd_text_w(&FONT_T16B, val, 1), y, val, C_DIM, LCD_TRANSPARENT, 1);
+			ellipsize(nf, more, sp.x1 + 1 - sp.x0 - 12 - lcd_text_w(vf, val, 1) - 4, 0, nm, sizeof(nm));
+			int cs = step >= 2 ? 6 : 8;
+			lcd_rrect(l, sp.x0, y + (pitch - cs) / 2, cs, cs, 2, C_OTHER);
+			lcd_draw(l, nf, sp.x0 + 12, y + (pitch - nf->h) / 2, nm, C_DIM, LCD_TRANSPARENT, 1);
+			lcd_draw(l, vf, sp.x1 + 1 - lcd_text_w(vf, val, 1), y + (pitch - vf->h) / 2, val, C_DIM, LCD_TRANSPARENT, 1);
 		}
 	}
 }
@@ -816,6 +946,34 @@ static void draw_speed_line(lcd_t *l, span_t sp, int y, int h, int size, int dow
 	draw_tri(l, x0, y + (h - 10) / 2, down, down ? C_DOWN : C_UP);
 	int x = lcd_draw(l, f, x0 + 18, y + (h - f->h) / 2, num, C_WHITE, LCD_TRANSPARENT, 1);
 	lcd_draw(l, uf, x + 4, y + (h + f->h) / 2 - uf->h - 1, unit, C_DIM, LCD_TRANSPARENT, 1);
+}
+
+/* Down and up speed on one line: arrow number unit, twice, the group centred. */
+static void draw_speed1(lcd_t *l, span_t sp, int y, int h, const traffic_t *t)
+{
+	char n1[16], n2[16];
+	const char *u1, *u2;
+	if (t->valid) { fmt_rate(t->down, n1, sizeof(n1), &u1); fmt_rate(t->up, n2, sizeof(n2), &u2); }
+	else { copy(n1, sizeof(n1), "--"); copy(n2, sizeof(n2), "--"); u1 = u2 = ""; }
+	int shared = t->valid && u1 == u2;               /* same unit: print it once, after the up value */
+	const font_t *f = &FONT_T16B, *uf = &FONT_T12;
+	int w1 = 16 + lcd_text_w(f, n1, 1) + (shared ? 0 : 3 + lcd_text_w(uf, u1, 1));
+	int w2 = 16 + lcd_text_w(f, n2, 1) + 3 + lcd_text_w(uf, u2, 1);
+	if (w1 + 8 + w2 > sp.x1 + 1 - sp.x0) {           /* both directions at 16 px do not always fit */
+		f = &FONT_T12;
+		w1 = 16 + lcd_text_w(f, n1, 1) + (shared ? 0 : 3 + lcd_text_w(uf, u1, 1));
+		w2 = 16 + lcd_text_w(f, n2, 1) + 3 + lcd_text_w(uf, u2, 1);
+	}
+	int x = sp.x0 + (sp.x1 + 1 - sp.x0 - (w1 + 8 + w2)) / 2;
+	if (x < sp.x0) x = sp.x0;
+	int ty = y + (h - f->h) / 2;
+	draw_tri(l, x, y + (h - 10) / 2, 1, C_DOWN);
+	int xe = lcd_draw(l, f, x + 16, ty, n1, C_WHITE, LCD_TRANSPARENT, 1);
+	if (!shared) lcd_draw(l, uf, xe + 3, y + (h + f->h) / 2 - uf->h - 1, u1, C_DIM, LCD_TRANSPARENT, 1);
+	x += w1 + 8;
+	draw_tri(l, x, y + (h - 10) / 2, 0, C_UP);
+	xe = lcd_draw(l, f, x + 16, ty, n2, C_WHITE, LCD_TRANSPARENT, 1);
+	lcd_draw(l, uf, xe + 3, y + (h + f->h) / 2 - uf->h - 1, u2, C_DIM, LCD_TRANSPARENT, 1);
 }
 
 /* Label, horizontal bar, value - the resource-row look. The label column fits the widest
@@ -841,6 +999,26 @@ static void draw_resource(lcd_t *l, span_t sp, int y, int h, int size, const cha
 	char val[8];
 	snprintf(val, sizeof(val), "%d%%", pct);
 	draw_bar_row(l, sp, y, h, size, label, pct, val, pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD);
+}
+
+/* CPU bar split into one segment per core (green below 50 %, amber to 80 %, red above). */
+static void draw_core_bar(lcd_t *l, span_t sp, int y, int h, int size, const res_t *r)
+{
+	const font_t *lf = size >= 16 ? &FONT_T16 : &FONT_T12, *vf = size >= 16 ? &FONT_T16B : &FONT_T12;
+	char val[8];
+	snprintf(val, sizeof(val), "%d%%", r->cpu);
+	int lw = lcd_text_w(lf, "Signal", 1) + 4, vw = lcd_text_w(vf, val, 1), bw = sp.x1 + 1 - sp.x0 - lw - vw - 6;
+	lcd_draw(l, lf, sp.x0, y + (h - lf->h) / 2, "CPU", C_DIM, LCD_TRANSPARENT, 1);
+	if (bw >= 24 && r->ncores > 0) {
+		int n = r->ncores, bh = size >= 16 ? 8 : 6, by = y + (h - bh) / 2;
+		for (int i = 0; i < n; i++) {
+			int pct = r->core[i] > 100 ? 100 : r->core[i];
+			int sx = sp.x0 + lw + bw * i / n, sw = bw * (i + 1) / n - bw * i / n;   /* segments tile the bar, no gaps */
+			lcd_fill(l, sx, by, sw, bh, C_TRACK);
+			if (sw * pct / 100 >= 2) lcd_fill(l, sx, by, sw * pct / 100, bh, pct < 50 ? C_OK : pct < 80 ? C_WARN : C_BAD);
+		}
+	}
+	lcd_draw(l, vf, sp.x1 + 1 - vw, y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
 }
 
 /* Clock face for the icon form of uptime (shared lines, where the "Uptime" label does not fit). */
@@ -939,6 +1117,142 @@ static int multiwan_h(const status_t *s, int size)
 	return s->nups >= 2 ? s->nups * ((size >= 16 ? FONT_T16B.h : FONT_T12.h) + 2 + (size >= 16 ? 8 : 6) + 4) : 0;
 }
 
+/* ---- uplinks widget: one icon per uplink, state colour, two 1 px traffic-share lines ---- */
+
+typedef struct { char label[32]; int wifi; int state; int pct; int signal, has_signal; double down, up; } uview_t;
+enum { UV_OK, UV_DIM, UV_NOROUTE, UV_OFF };
+
+/* Display list: mwan3 interfaces when the collector heard from mwan3 (they are shown even
+ * without a default route - that mismatch is the point), otherwise the route uplinks. */
+static int build_uplinks(const status_t *s, const traffic_t *t, uview_t *v)
+{
+	int n = 0;
+	if (s->nmw > 0) {
+		for (int i = 0; i < s->nmw && n < 3; i++) {
+			uview_t *u = &v[n];
+			memset(u, 0, sizeof(*u));
+			u->pct = s->mw[i].pct;
+			int m = -1;
+			for (int j = 0; j < s->nups; j++) if (!strcmp(s->ups[j].dev, s->mw[i].dev)) m = j;
+			if (m >= 0) {
+				copy(u->label, sizeof(u->label), uplink_label(s, m));
+				u->wifi = !strcmp(s->ups[m].type, "wifi");
+				u->signal = s->ups[m].signal; u->has_signal = s->ups[m].has_signal;
+			} else {
+				copy(u->label, sizeof(u->label), s->mw[i].ifname);
+				u->wifi = !strncmp(s->mw[i].dev, "phy", 3) || !strncmp(s->mw[i].dev, "wlan", 4);
+			}
+			for (int j = 0; j < t->nu; j++) if (!strcmp(t->u[j].dev, s->mw[i].dev)) { u->down = t->u[j].down; u->up = t->u[j].up; }
+			int off = !strcmp(s->mw[i].state, "offline") || !strcmp(s->mw[i].state, "down") || !strcmp(s->mw[i].state, "disabled");
+			u->state = off ? UV_OFF : m < 0 ? UV_NOROUTE : s->mw[i].pct == 0 ? UV_DIM : UV_OK;
+			n++;
+		}
+		return n;
+	}
+	for (int i = 0; i < s->nups && n < 3; i++) {
+		uview_t *u = &v[n];
+		memset(u, 0, sizeof(*u));
+		u->pct = -1;
+		copy(u->label, sizeof(u->label), uplink_label(s, i));
+		u->wifi = !strcmp(s->ups[i].type, "wifi");
+		u->signal = s->ups[i].signal; u->has_signal = s->ups[i].has_signal;
+		for (int j = 0; j < t->nu; j++) if (!strcmp(t->u[j].dev, s->ups[i].dev)) { u->down = t->u[j].down; u->up = t->u[j].up; }
+		u->state = u->down + u->up > 0 ? UV_OK : UV_DIM;
+		n++;
+	}
+	return n;
+}
+
+static uint32_t upl_color(int state)
+{
+	switch (state) {
+	case UV_OK: return C_OK;
+	case UV_NOROUTE: return C_WARN;
+	case UV_OFF: return C_BAD;
+	default: return RGB(90, 110, 95);   /* standby: dim green-grey */
+	}
+}
+
+/* Ethernet port: rounded outline, three pins, cable stub below. */
+static void draw_port(lcd_t *l, int cx, int y, int size, uint32_t c)
+{
+	int w = size >= 24 ? 20 : 14, h = size >= 24 ? 14 : 10, x = cx - w / 2, py = y + (size - h) / 2 - 2;
+	lcd_rrect(l, x, py, w, h, 3, c);
+	lcd_rrect(l, x + 2, py + 2, w - 4, h - 4, 2, C_BG);
+	for (int i = 0; i < 3; i++) lcd_fill(l, x + w / 4 + i * w / 4 - 1, py + 2, 2, h / 2, c);
+	lcd_fill(l, cx - 2, py + h, 4, size >= 24 ? 5 : 3, c);
+}
+
+#define UPL_TAIL 20   /* label line (12) + two 1 px share lines with gaps */
+
+static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s, const traffic_t *t, int layout, int generic)
+{
+	uview_t v[3];
+	int n = build_uplinks(s, t, v);
+	if (n == 0) {
+		lcd_draw(l, &FONT_T12, (sp.x0 + sp.x1 + 1) / 2 - lcd_text_w(&FONT_T12, "no uplink", 1) / 2, y + 2, "no uplink", C_BAD, LCD_TRANSPARENT, 1);
+		return;
+	}
+	int split = 0;
+	for (int i = 0; i < n; i++) if (v[i].pct > 0 && v[i].pct < 100) split = 1;
+	if (layout) {          /* one line per uplink: icon beside its label, lines stacked */
+		const font_t *lf = size >= 24 ? &FONT_T16B : &FONT_T12;
+		for (int i = 0; i < n; i++) {
+			uint32_t col = upl_color(v[i].state);
+			int ry = y + i * size, cx = sp.x0 + size / 2;
+			char lab[40], out[40];
+			copy(lab, sizeof(lab), generic ? (v[i].wifi ? "WiFi" : "Eth") : v[i].label);
+			if (split && v[i].pct >= 0) snprintf(lab + strlen(lab), sizeof(lab) - strlen(lab), " %d%%", v[i].pct);
+			if (v[i].wifi) draw_fan(l, cx, ry + size, size, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
+			else draw_port(l, cx, ry, size, col);
+			if (v[i].state == UV_OFF)
+				for (int k = -size / 2; k <= size / 2; k++) lcd_fill(l, cx + k, ry + size / 2 - k, 2, 2, col);
+			int lx = sp.x0 + size + (v[i].wifi ? 16 : 6);   /* the fan's arcs reach past its centre column */
+			const font_t *lf2 = ((int)strlen(lab) * lf->w > sp.x1 - lx && lf != &FONT_T12) ? &FONT_T12 : lf;   /* shrink before truncating */
+			ellipsize(lf2, lab, sp.x1 - lx, 0, out, sizeof(out));
+			lcd_draw(l, lf2, lx, ry + (size - lf2->h) / 2, out, col, LCD_TRANSPARENT, 1);
+		}
+	} else {               /* icon above its label, uplinks side by side */
+		int cw = (sp.x1 - sp.x0 + 1) / n;
+		for (int i = 0; i < n; i++) {
+			int cx = sp.x0 + cw * i + cw / 2;
+			uint32_t col = upl_color(v[i].state);
+			char lab[40], out[40];
+			copy(lab, sizeof(lab), generic ? (v[i].wifi ? "WiFi" : "Eth") : v[i].label);
+			if (split && v[i].pct >= 0) snprintf(lab + strlen(lab), sizeof(lab) - strlen(lab), " %d%%", v[i].pct);
+			if (v[i].wifi) draw_fan(l, cx, y + size, size, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
+			else draw_port(l, cx, y, size, col);
+			if (v[i].state == UV_OFF)
+				for (int k = -size / 2; k <= size / 2; k++) lcd_fill(l, cx + k, y + size / 2 - k, 2, 2, col);
+			ellipsize(&FONT_T12, lab, cw - 2, 0, out, sizeof(out));
+			lcd_draw(l, &FONT_T12, cx - lcd_text_w(&FONT_T12, out, 1) / 2, y + size + 2, out, col, LCD_TRANSPARENT, 1);
+		}
+	}
+	/* observed split: down line over up line, 1 px each, segments in the uplink colours */
+	double dt = 0, ut = 0;
+	for (int i = 0; i < n; i++) { dt += v[i].down; ut += v[i].up; }
+	int wdt = sp.x1 - sp.x0 + 1, ly = y + (layout ? n * size + 3 : size + 2 + 12 + 2);
+	for (int line = 0; line < 2; line++) {
+		double tot = line ? ut : dt, acc = 0;
+		lcd_fill(l, sp.x0, ly + line * 3, wdt, 1, C_TRACK);
+		for (int i = 0; i < n && tot > 0; i++) {
+			double val = line ? v[i].up : v[i].down;
+			int x0 = sp.x0 + (int)(acc / tot * wdt + 0.5);
+			acc += val;
+			int x1 = sp.x0 + (int)(acc / tot * wdt + 0.5);
+			if (x1 > x0) lcd_fill(l, x0, ly + line * 3, x1 - x0, 1, UPL_COLOR[i % UPL_COLORS]);
+		}
+	}
+}
+
+static int uplinks_h(const status_t *s, const traffic_t *t, int size, int layout)
+{
+	uview_t v[3];
+	int n = build_uplinks(s, t, v);
+	if (!n) return FONT_T12.h + 2;
+	return layout ? n * size + 8 + 2 : size + UPL_TAIL + 2;
+}
+
 /* ---------------------------------------------------------------------------------------- widgets */
 
 typedef struct { const status_t *s; const traffic_t *tr; const res_t *res; const char *state; int backfill; int row_step; int name_len; } ctx_t;
@@ -992,7 +1306,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
 		int m = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic };
 			int hh = widget_h(&t, c);
 			if (hh > m) m = hh;
 		}
@@ -1029,6 +1343,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	case W_DONUT: return wd->size + PAD;
 	case W_TEMP: return c->res->temp >= 0 ? wd->size + PAD : 0;
 	case W_MULTIWAN: return multiwan_h(c->s, wd->size);
+	case W_UPLINKS: return uplinks_h(c->s, c->tr, wd->size, wd->layout);     /* never hidden: shows "no uplink" when empty */
 	default: return wd->size + PAD;
 	}
 }
@@ -1067,12 +1382,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		/* visible members get equal cells of the span, each drawn centred in its cell */
 		int vis[MAX_SUB], nv = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic };
 			if (widget_h(&t, c)) vis[nv++] = i;
 		}
 		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
 		for (int k = 0; k < nv; k++) {
-			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink };
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic };
 			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
 			widget_draw_sp(l, w, &t, c, y, h, cell);
 		}
@@ -1189,18 +1504,43 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		draw_speed_line(l, sp, y, h / 2, wd->size, 1, c->tr->down, c->tr->valid);
 		draw_speed_line(l, sp, y + h / 2, h / 2, wd->size, 0, c->tr->up, c->tr->valid);
 		break;
+	case W_SPEED1: draw_speed1(l, sp, y, h, c->tr); break;
 	case W_SPEEDBAR: draw_share_bar(l, c->tr, 0, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_SPEEDDN: draw_share_bar_m(l, c->tr, BM_DRATE, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_SPEEDUP: draw_share_bar_m(l, c->tr, BM_URATE, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
 	case W_USAGEBAR: draw_share_bar(l, c->tr, 1, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_USAGEDN: draw_total_bar(l, c->tr, 1, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_USAGEUP: draw_total_bar(l, c->tr, 0, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
 	case W_USAGE:
 		if (c->tr->valid) fmt_bytes(c->tr->dtot + c->tr->utot, buf, sizeof(buf));
 		else copy(buf, sizeof(buf), "--");
 		row_text(l, sp, y, h, wd->size, "Total", buf, C_WHITE, 0, NULL, 0, &c->row_step);
 		break;
-	case W_LEGEND: draw_legend(l, w, c->tr, 0, wd->size, y, c->name_len); break;
-	case W_LEGENDTOTAL: draw_legend(l, w, c->tr, 1, wd->size, y, c->name_len); break;
+	case W_LEGEND: draw_legend(l, w, c->tr, 0, wd->size, y, h, c->name_len, wd->bg, wd->fit); break;
+	case W_LEGENDTOTAL: draw_legend(l, w, c->tr, 1, wd->size, y, h, c->name_len, wd->bg, wd->fit); break;
 	case W_DONUT: draw_donut(l, c->tr, (sp.x0 + sp.x1 + 1) / 2, y + h / 2, (wd->size - 2) / 2); break;
 	case W_MULTIWAN: draw_multiwan(l, w, s, c->tr, wd->size, y); break;
-	case W_CPU: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "CPU", c->res->cpu, C_TRACK); break;
+	case W_UPLINKS: draw_uplinks(l, sp, y, wd->size, s, c->tr, wd->layout, wd->generic); break;
+	case W_CPU:
+		if (wd->cores && c->res->ncores > 0) draw_core_bar(l, sp, y, h, c->row_step ? 12 : wd->size, c->res);
+		else draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "CPU", c->res->cpu, C_TRACK);
+		break;
+	case W_LOAD: {
+		/* Background bar behind the row (like the legend's), width = load vs all cores;
+		 * "LA" and the 1/5/15 triple (16 px) or 1-minute value (12 px) on top of it. */
+		int nc = c->res->ncores > 0 ? c->res->ncores : 4, pct = c->res->load[0] / nc, sz = c->row_step ? 12 : wd->size;
+		char val[48];
+		const font_t *lf = &FONT_T12, *vf = &FONT_T12;
+		if (sz >= 16) snprintf(val, sizeof(val), "%d.%02d %d.%02d %d.%02d", c->res->load[0] / 100, c->res->load[0] % 100, c->res->load[1] / 100, c->res->load[1] % 100, c->res->load[2] / 100, c->res->load[2] % 100);
+		else snprintf(val, sizeof(val), "%d.%02d", c->res->load[0] / 100, c->res->load[0] % 100);
+		uint32_t col = pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD;
+		int bw = (sp.x1 + 1 - sp.x0) * (pct > 100 ? 100 : pct) / 100;
+		if (bw > 0) lcd_fill(l, sp.x0, y + 1, bw, h - 2, dim_color(col, 34));
+		lcd_fill(l, sp.x0, y + h - 3, bw, 1, col);          /* bright 1 px line at the bottom edge, as in the legend */
+		lcd_draw(l, lf, sp.x0, y + (h - lf->h) / 2, "LA", C_DIM, LCD_TRANSPARENT, 1);
+		lcd_draw(l, vf, sp.x1 + 1 - lcd_text_w(vf, val, 1), y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
+		break;
+	}
 	case W_RAM: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "RAM", c->res->ram, C_TRACK); break;
 	case W_FLASH: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "Flash", c->res->flash, C_TRACK); break;
 	case W_TEMP: {
@@ -1283,7 +1623,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			for (int j = 0; j < sc->w[i].nsub; j++) {
 				int st = sc->w[i].sub[j].type;
 				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
-					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink };
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic };
 					widget_draw(NULL, w, &mt, &c, top, hs[i]);
 				}
 			}
@@ -1336,7 +1676,7 @@ static void write_rle(lcd_t *l, const win_t *w)
 	printf("\n");
 }
 
-static int type_uses_traffic(int t) { return (t >= W_SPEED && t <= W_DONUT) || t == W_MULTIWAN; }
+static int type_uses_traffic(int t) { return (t >= W_SPEED && t <= W_DONUT) || t == W_MULTIWAN || t == W_UPLINKS; }
 static int type_uses_res(int t) { return t >= W_CPU && t <= W_TEMP; }
 
 static int screen_uses_traffic(const screen_t *sc)
@@ -1486,7 +1826,9 @@ int main(int argc, char **argv)
 			fmt_uptime(st.uptime, up_s, sizeof(up_s));
 			for (int i = 0; i < st.nups; i++)
 				snprintf(ups_s + strlen(ups_s), sizeof(ups_s) - strlen(ups_s), "%s/%s/%d,", st.ups[i].dev, st.ups[i].name, st.ups[i].signal);
-			snprintf(sig, sizeof(sig), "%d,%d,%d,%d|%u|%d|%s|%d|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s|%d|%s", res.cpu, res.ram, res.flash, res.temp, tr_gen, pos, state, st.valid, st.up_type,
+			for (int i = 0; i < st.nmw; i++)
+				snprintf(ups_s + strlen(ups_s), sizeof(ups_s) - strlen(ups_s), "mw%s/%s/%d,", st.mw[i].ifname, st.mw[i].state, st.mw[i].pct);
+			snprintf(sig, sizeof(sig), "%d,%d,%d,%d,%d,%d,%d,%d,%d|%u|%d|%s|%d|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s|%d|%s", res.cpu, res.ram, res.flash, res.temp, res.load[0], res.load[1], res.load[2], res.core[0], res.core[1], tr_gen, pos, state, st.valid, st.up_type,
 				 st.up_name, st.up_detail, st.wan_ip, st.lan_ip, st.has_signal, st.signal, st.speed, st.vpn_state,
 				 st.vpn_name, st.inet, st.clients, up_s);
 			strncat(sig, ups_s, sizeof(sig) - strlen(sig) - 1);

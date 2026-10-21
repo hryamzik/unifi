@@ -14,6 +14,8 @@
 #   inet       ok|fail   a ping to 1.1.1.1 got through (only printed when up_state=up)
 #   ups        number of uplinks (default routes in any table, VPN devices excluded, lowest metric first; at most 3)
 #   upN_dev upN_type upN_name upN_signal upN_speed upN_metric   for N = 0..ups-1 (N=0 is the same uplink as up_*)
+#   mws        number of mwan3 interfaces (only when mwan3 answers), mwN_if mwN_dev mwN_state mwN_pct
+#              (state from `mwan3 status`, pct = share in the policy of the default rule, -1 = unknown)
 #   vpn_state  up|down|none
 #   vpn_name   VPN interface name
 #   clients    LAN clients (complete ARP entries on the LAN bridge)
@@ -91,6 +93,32 @@ for e in $(ip route show table all 2>/dev/null | awk '$1=="default"{m=0; d=""; f
 	n=$((n + 1))
 done
 echo "ups=$n"
+
+# mwan3 interfaces and their state (optional: absent on routers without mwan3)
+if command -v mwan3 >/dev/null 2>&1 && [ -f /etc/config/mwan3 ]; then
+	mw_raw=$(mwan3 status 2>/dev/null)
+	if [ -n "$mw_raw" ]; then
+		mw_pol=$(uci -q get mwan3.default_rule_v4.use_policy 2>/dev/null)
+		[ -n "$mw_pol" ] || mw_pol=$(uci -q get mwan3.default_rule_v6.use_policy 2>/dev/null)
+		printf '%s\n' "$mw_raw" | awk -v pol="$mw_pol" '
+			/^Interface status:/ { sec=1; next }
+			/^Current ipv4 policies:/ { sec=2; next }
+			/^Current ipv6|^Directly/ { sec=0 }
+			sec==1 && $1=="interface" { st[$2]=$4; ord[++n]=$2 }
+			sec==2 && /^[^ \t].*:$/ { cur=$0; sub(/:$/, "", cur) }
+			sec==2 && cur==pol && $2 ~ /^\(/ { p=$2; gsub(/[()%]/, "", p); pct[$1]=p }
+			END { print "mws=" n; for (i=1;i<=n;i++) printf "mw%d_if=%s\nmw%d_state=%s\nmw%d_pct=%d\n", i-1, ord[i], i-1, st[ord[i]], i-1, (ord[i] in pct) ? pct[ord[i]] : -1 }'
+		mw_i=0
+		for mw_if in $(printf '%s\n' "$mw_raw" | awk '/^Interface status:/{s=1;next} /^Current/{s=0} s && $1=="interface"{print $2}'); do
+			mw_dev=$(uci -q get "network.$mw_if.device" 2>/dev/null)
+			[ -n "$mw_dev" ] || mw_dev=$(uci -q get "network.$mw_if.ifname" 2>/dev/null)
+			[ -n "$mw_dev" ] || mw_dev=$mw_if
+			echo "mw${mw_i}_dev=$mw_dev"
+			mw_i=$((mw_i + 1))
+			[ "$mw_i" -ge 3 ] && break
+		done
+	fi
+fi
 
 # VPN: first matching interface
 vpn=""

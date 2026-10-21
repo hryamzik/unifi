@@ -27,7 +27,7 @@ SCREEN_NO=0
 SCREEN_SHOWN=0
 screen_widget() {
 	echo "widget=$1"
-	case "$1" in *speed*|*usage*|*legend*|*donut*) [ "$SCREEN_SHOWN" = 1 ] && TRAFFIC_WANTED=1 ;; esac
+	case "$1" in *speed*|*usage*|*legend*|*donut*|*multiwan*|*uplinks*) [ "$SCREEN_SHOWN" = 1 ] && TRAFFIC_WANTED=1 ;; esac
 }
 
 screen_section() {
