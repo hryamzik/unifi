@@ -39,6 +39,14 @@ status panel (running mode, panel driver, stock bundle, uplink, WAN IP, VPN, cli
 same way (`apk add --allow-untrusted ./luci-app-utr-lcd-*.apk` or `opkg install ./luci-app-utr-lcd_*.ipk`).
 Save & Apply restarts the display service.
 
+It also adds **Services > LCD Screens**, an editor for the native screens: add, reorder and remove
+screens, set dwell time, status indicator and signal backfill per screen, pick widgets and sizes (a
+meter shows the used and free pixels of the screen and an "add" choice that no longer fits is greyed
+out), set the rotation order, and see every screen drawn by the router's own renderer while you edit,
+before saving. The preview can use live data or example data and can play what-if cases (weak Wi-Fi,
+wired uplink, no uplink, no internet, VPN up/down/none). The editor is greyed out while the stock look
+is running.
+
 ### Optional: stock Ubiquiti look
 
 Ubiquiti's UI binaries are proprietary and cannot be redistributed, so build the bundle from a
@@ -95,7 +103,9 @@ The built-in renderer shows one or more screens, each a stack of widgets over an
 
 Traffic is sampled by `traffic.sh` every 2 s, only while a screen that is shown has traffic widgets, and kept in RAM (`/var/run/utr-lcd/traffic`; nothing is written to flash). Uplinks are all default routes (in any routing table, so mwan3 setups work too; VPN devices excluded), lowest metric first; with two or more, `multiwan` shows each one's share and a higher-metric uplink without traffic is labelled `backup`. With several Wi-Fi uplinks the signal backfill is split into one vertical strip per uplink (this is only visible as such, no extra text). Wi-Fi clients come from `iw station dump` (names from the DHCP leases), all wired ports together count as one client `LAN`, totals are since the sampler started. Each client keeps its colour (hash of the MAC); the biggest six get a bar segment, the rest share a grey one.
 
-While the backlight is off the rotation pauses. Edit with `uci` and `uci commit utr-lcd; reload_config`; a LuCI editor with a live preview is planned.
+While the backlight is off the rotation pauses. Edit with `uci` and `uci commit utr-lcd; reload_config`, or use the LuCI editor (Services > LCD Screens).
+
+One screen can be rendered once for inspection: `utr-lcd-status -P -N 2 -C screens.conf -c /usr/libexec/utr-lcd/collect.sh` prints it as run-length text (`tools/rle2png.py` turns that into a PNG); this is what the LuCI preview uses.
 
 ## How it works
 
