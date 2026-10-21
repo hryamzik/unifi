@@ -407,7 +407,7 @@ static void res_sample(res_t *r, cpu_prev_t *cp)
 
 enum { W_SSID, W_DBM, W_BARS, W_SIGBAR, W_FAN, W_SEGBAR, W_STATUS, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
        W_SPEED, W_SPEED1, W_SPEEDBAR, W_SPEEDDN, W_SPEEDUP, W_USAGE, W_USAGEBAR, W_USAGEDN, W_USAGEUP, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
-       W_CPU, W_RAM, W_FLASH, W_LOAD, W_TEMP, W_MULTIWAN, W_UPLINKS, W_ROW, W_NTYPES };
+       W_CPU, W_RAM, W_FLASH, W_LOAD, W_TEMP, W_CPURAM, W_MULTIWAN, W_UPLINKS, W_ROW, W_NTYPES };
 enum { ST_DOT, ST_PILL, ST_NONE };   /* legacy "indicator" config values, parsed but no longer drawn */
 
 typedef struct { const char *name; int def_size; } wtype_t;
@@ -445,6 +445,7 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_MULTIWAN] = { "multiwan", 16 },      /* share of traffic per uplink (hidden with a single uplink); size 12 or 16 */
 	[W_UPLINKS] = { "uplinks", 24 },        /* uplink icons + state (mwan3 when available); never hidden; size = icon 16 or 24 */
 	[W_TEMP]    = { "temp", 16 },           /* Wi-Fi chip temperature (hidden when there is no sensor) */
+	[W_CPURAM]  = { "cpuram", 12 },         /* CPU and RAM side by side on one line (for non-resource screens) */
 };
 
 #define MAX_WIDGETS 16
@@ -997,7 +998,7 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 					int uw = spanw * (int)(uv * 100 / den) / 100;
 					int dw = spanw * (int)(dv * 100 / den) / 100;
 					if (uh < 2) uh = 2;
-					if (uw > 0) lcd_fill(l, sp.x0, y, uw, uh, dim_color(col, 65));
+					if (uw > 0) lcd_fill(l, sp.x0, y, uw, uh, dim_color(bar_color(PALETTE[c->color]), 92));   /* upload brighter, download as-is */
 					if (dw > 0) lcd_fill(l, sp.x0, y + uh, dw, bh - uh, col);
 					bw = uw > dw ? uw : dw;
 				} else {
@@ -1123,6 +1124,29 @@ static void draw_resource(lcd_t *l, span_t sp, int y, int h, int size, const cha
 	char val[8];
 	snprintf(val, sizeof(val), "%d%%", pct);
 	draw_bar_row(l, sp, y, h, size, label, pct, val, pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD);
+}
+
+/* CPU and RAM on one line, each in its own half: label, small bar, percent. On screens that are
+ * not a stack of resource rows the aligned label column of draw_bar_row just wastes room. */
+static void draw_cpuram(lcd_t *l, span_t sp, int y, int h, int size, const res_t *r)
+{
+	const font_t *lf = size >= 16 ? &FONT_T16 : &FONT_T12, *vf = size >= 16 ? &FONT_T16B : &FONT_T12;
+	const struct { const char *lab; int pct; } it[2] = { { "CPU", r->cpu }, { "RAM", r->ram } };
+	int mid = (sp.x0 + sp.x1 + 1) / 2, bh = size >= 16 ? 8 : 6;
+	for (int i = 0; i < 2; i++) {
+		int x0 = i ? mid + 3 : sp.x0, x1 = i ? sp.x1 : mid - 4;
+		char val[8];
+		snprintf(val, sizeof(val), "%d%%", it[i].pct);
+		int vw = lcd_text_w(vf, val, 1);
+		lcd_draw(l, lf, x0, y + (h - lf->h) / 2, it[i].lab, C_DIM, LCD_TRANSPARENT, 1);
+		int bx = x0 + lcd_text_w(lf, it[i].lab, 1) + 3, bw = x1 + 1 - vw - 3 - bx;
+		if (bw >= 8) {
+			int pct = it[i].pct > 100 ? 100 : it[i].pct, fw = bw * pct / 100;
+			lcd_rrect(l, bx, y + (h - bh) / 2, bw, bh, 3, C_TRACK);
+			if (fw >= 3) lcd_rrect(l, bx, y + (h - bh) / 2, fw, bh, 3, pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD);
+		}
+		lcd_draw(l, vf, x1 + 1 - vw, y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
+	}
 }
 
 /* CPU bar split into one segment per core (green below 50 %, amber to 80 %, red above). */
@@ -1702,6 +1726,7 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		break;
 	}
 	case W_RAM: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "RAM", c->res->ram, C_TRACK); break;
+	case W_CPURAM: draw_cpuram(l, sp, y, h, c->row_step ? 12 : wd->size, c->res); break;
 	case W_FLASH: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "Flash", c->res->flash, C_TRACK); break;
 	case W_TEMP: {
 		int big = wd->size >= 16 && !c->row_step;
@@ -1849,7 +1874,7 @@ static void write_rle(lcd_t *l, const win_t *w)
 }
 
 static int type_uses_traffic(int t) { return (t >= W_SPEED && t <= W_DONUT) || t == W_MULTIWAN || t == W_UPLINKS; }
-static int type_uses_res(int t) { return t >= W_CPU && t <= W_TEMP; }
+static int type_uses_res(int t) { return t >= W_CPU && t <= W_CPURAM; }
 
 static int screen_uses_traffic(const screen_t *sc)
 {

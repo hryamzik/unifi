@@ -50,6 +50,7 @@ var TYPES = {
 	donut:       { label: 'Speed by client (ring)', group: 'traffic', sizes: [48, 64, 80, 96], def: 80, unit: 'px' },
 	multiwan:    { label: 'Multi-WAN shares',      group: 'traffic', sizes: [12, 16], def: 16 },
 	cpu:         { label: 'CPU load',              group: 'resources', sizes: [12, 16], def: 16 },
+	cpuram:      { label: 'CPU + memory (one line)', group: 'resources', sizes: [12, 16], def: 12 },
 	ram:         { label: 'Memory',                group: 'resources', sizes: [12, 16], def: 16 },
 	flash:       { label: 'Flash storage',         group: 'resources', sizes: [12, 16], def: 16 },
 	load:        { label: 'Load average',          group: 'resources', sizes: [12, 16], def: 16 },
