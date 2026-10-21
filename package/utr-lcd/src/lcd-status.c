@@ -790,8 +790,8 @@ static void draw_tri(lcd_t *l, int x, int y, int down, uint32_t c)
 static uint32_t bar_color(uint32_t c)
 {
 	int r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255, lum = (r * 299 + g * 587 + b * 114) / 1000;
-	if (lum <= 0 || lum >= 150) return c;
-	r = r * 150 / lum; g = g * 150 / lum; b = b * 150 / lum;
+	if (lum <= 0 || lum >= 185) return c;
+	r = r * 185 / lum; g = g * 185 / lum; b = b * 185 / lum;
 	return RGB(r > 255 ? 255 : r, g > 255 ? 255 : g, b > 255 ? 255 : b);
 }
 
@@ -1187,6 +1187,21 @@ static int build_uplinks(const status_t *s, const traffic_t *t, uview_t *v)
 			for (int j = 0; j < t->nu; j++) if (!strcmp(t->u[j].dev, s->mw[i].dev)) { u->down = t->u[j].down; u->up = t->u[j].up; }
 			int off = !strcmp(s->mw[i].state, "offline") || !strcmp(s->mw[i].state, "down") || !strcmp(s->mw[i].state, "disabled");
 			u->state = off ? UV_OFF : m < 0 ? UV_NOROUTE : s->mw[i].pct == 0 ? UV_DIM : UV_OK;
+			n++;
+		}
+		/* route uplinks mwan3 does not manage (e.g. a second STA in the main table): show them too */
+		for (int j = 0; j < s->nups && n < 3; j++) {
+			int known = 0;
+			for (int i = 0; i < s->nmw; i++) if (!strcmp(s->mw[i].dev, s->ups[j].dev)) known = 1;
+			if (known) continue;
+			uview_t *u = &v[n];
+			memset(u, 0, sizeof(*u));
+			u->pct = -1;
+			copy(u->label, sizeof(u->label), uplink_label(s, j));
+			u->wifi = !strcmp(s->ups[j].type, "wifi");
+			u->signal = s->ups[j].signal; u->has_signal = s->ups[j].has_signal;
+			for (int k = 0; k < t->nu; k++) if (!strcmp(t->u[k].dev, s->ups[j].dev)) { u->down = t->u[k].down; u->up = t->u[k].up; }
+			u->state = u->down + u->up > 0 ? UV_OK : UV_DIM;
 			n++;
 		}
 		return n;
