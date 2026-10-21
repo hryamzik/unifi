@@ -720,6 +720,13 @@ static void row_text(lcd_t *l, span_t sp, int y, int h, int size, const char *la
 	*step = st;
 	if (!l) return;
 	int lw = lw0 + lcd_text_w(LAB[st], label, 1);
+	if (label[0] && lw + 4 + lcd_text_w(VAL[st], value, 1) > width) {
+		/* a narrow shared-line cell cannot carry both: the value alone, ellipsized */
+		ellipsize(VAL[st], value, width - lw0, middle, buf, sizeof(buf));
+		if (icon) draw_icon(l, sp.x0, y + (h - 16) / 2, icon, icon_c, 1);
+		lcd_draw(l, VAL[st], sp.x1 + 1 - lcd_text_w(VAL[st], buf, 1), y + (h - VAL[st]->h) / 2, buf, vc, LCD_TRANSPARENT, 1);
+		return;
+	}
 	ellipsize(VAL[st], value, width - lw - 4, middle, buf, sizeof(buf));
 	if (icon) draw_icon(l, sp.x0, y + (h - 16) / 2, icon, icon_c, 1);
 	lcd_draw(l, LAB[st], sp.x0 + lw0, y + (h - LAB[st]->h) / 2, label, C_DIM, LCD_TRANSPARENT, 1);
