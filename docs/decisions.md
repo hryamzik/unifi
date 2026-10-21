@@ -28,6 +28,15 @@ The package works with the built-in renderer alone. The Ubiquiti-style UI is an 
 - `feed.sh` replaces Ubiquiti's `mcad`: it maps OpenWrt state to the stock `ui info` / `ui state` ubus calls (`ready`, `noUplink`, `noInternet`). Uplink type maps to `ath4` (Wi-Fi), `usb0`, `eth0`; WireGuard/Tailscale/OpenVPN interfaces map to the VPN page. It never calls shutdown/restart/reset states.
 - `utr-lcd-fb2drm` copies `fb0.raw` to the panel through DRM (rotation, optional offset).
 
+### Native renderer: screens, widgets, playlist
+Designed in a long review with the owner (the questions and answers are in the chat history; the outcome is here).
+- A **screen** is a stack of **widgets** with fixed pixel heights (text sizes 16/24/32, rows 12/16), drawn over an optional **Wi-Fi signal backfill** (vertical fill from the bottom, red to green, dimmed to `fill_dim` percent, optional bright edge line; Wi-Fi uplink only, it costs no space) and a **status indicator** (dot, grown into a text banner on NO UPLINK / NO INTERNET; or a full pill; or none). Every screen has its own `dwell` (0.5 s minimum), an `enabled` flag, and the rotation follows a `playlist` (`1 2 1 3`, empty = all enabled screens) or pins one screen.
+- Layout is computed on every draw from what there is to show: a widget with no data (no VPN configured, no signal) takes no room, spare room is spread evenly (max 14 px gaps), and each row's usable width is reduced by the measured corner circle (r=31) at its own y, so nothing sits in a cut corner.
+- Fit policy: text steps down the font ladder (32 -> 24 -> 16 -> 12 px) before anything is cut; only then `..` replaces the end (names) or the middle (IP addresses). All rows of a screen share one step so they stay aligned. Numbers must never be drawn over charts.
+- Config: `/etc/config/utr-lcd` (`config screen` sections, `list widget 'type:size'`) is flattened by the init script into `/var/run/utr-lcd/screens.conf` (key=value, parsed by the C renderer, same file feeds the offline preview). No file or no screens: built-in defaults (same two screens), so the renderer works standalone.
+- The collector runs in the background and is read without blocking, so 0.5 s dwells do not stutter. The screen is redrawn only when the screen or the data changed.
+- Planned (see the milestones in the chat): M2 traffic data (per-client bytes in RAM only, collected only while a traffic screen is in the playlist, LAN as one client, horizontal stacked bar default, donut optional, client colours stable by MAC), M3 LuCI editor with live preview, M4 multi-WAN (backfill split horizontally per Wi-Fi uplink), resources widgets, VPN states, M5 upstream packaging.
+
 ### procd supervises everything
 `/etc/init.d/utr-lcd` starts either the native instance, or `ubusd` + `ulcmd` + `fb2drm` + `feed` as separate procd instances with respawn. Logs go to syslog (`logread`). The init script fails softly (log line) when `/dev/dri/card0` is missing.
 

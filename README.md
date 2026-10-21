@@ -72,7 +72,27 @@ from flash except the bundle itself (~7 MB in `/usr/share/utr-lcd/stock`).
 | `dim_level` | `15` | backlight percent while dimmed |
 | `motion_threshold` | `50` | motion that restores full brightness, in milli-g (1000 = 1 g); lower is more sensitive, below about 15 the sensor noise triggers it |
 | `sensor_rate` | `25` | accelerometer sampling rate in Hz while dimming is active (the driver default of 1 Hz makes every read block for seconds); `0` leaves it alone |
+| `screen_mode` | `rotate` | native mode: `rotate` through the screens, or `pin` one (`screen_pin`, 1 = first screen) |
+| `playlist` | empty | native mode: order of rotation by screen number, e.g. `1 2 1 3` shows screen 1 twice per round; empty = every enabled screen in order |
+| `fill_dim`, `fill_edge` | `30`, `1` | native mode: Wi-Fi signal backfill brightness in percent of the full colour, and a bright line at its edge |
 | `screen_timeout` | `0` | both modes: turn the backlight off after this many seconds without motion; `0` never turns it off. Moving the router restores full brightness |
+
+### Screens (native mode)
+
+The built-in renderer shows one or more screens, each a stack of widgets over an optional signal backfill.
+`config screen` sections define them in order (screen 1 is the first section); the defaults are *Status*
+(SSID, signal, client count, 8 s) and *Details* (WAN IP, LAN IP, VPN, uptime, 5 s).
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `name` | | label for your own use |
+| `dwell` | `8` | seconds on screen, 0.5 or more |
+| `enabled` | `1` | `0` keeps the screen configured but out of the rotation |
+| `indicator` | `dot` | online status: a coloured `dot` that grows into a text banner (NO UPLINK, NO INTERNET) when something is wrong, a full `pill`, or `none` |
+| `backfill` | `1` | colour the screen from the bottom by the Wi-Fi signal (red poor, green full); only for a Wi-Fi uplink |
+| `list widget` | | widgets top to bottom as `type:size`: `ssid dbm clients` (sizes 16, 24, 32), `wanip lanip vpn uptime` (12, 16), `rule`. A widget with nothing to show (no VPN configured, no signal) takes no room; spare room is spread between the widgets. Text steps down to a smaller size before it is cut, addresses are shortened in the middle |
+
+While the backlight is off the rotation pauses. Edit with `uci` and `uci commit utr-lcd; reload_config`; a LuCI editor with a live preview is planned.
 
 ## How it works
 

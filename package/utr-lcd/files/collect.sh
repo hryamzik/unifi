@@ -10,6 +10,7 @@
 #   up_name    SSID (wifi) or "Ethernet"
 #   up_detail  signal (wifi) / link speed (eth) / device name
 #   wan_ip     IPv4 address of the uplink device
+#   lan_ip     IPv4 address of the LAN bridge
 #   inet       ok|fail   a ping to 1.1.1.1 got through (only printed when up_state=up)
 #   vpn_state  up|down|none
 #   vpn_name   VPN interface name
@@ -78,5 +79,6 @@ else
 	fi
 fi
 
+echo "lan_ip=$(ip -4 addr show dev "$LAN_IF" 2>/dev/null | awk '/inet /{sub("/.*","",$2); print $2; exit}')"
 echo "clients=$(awk -v d="$LAN_IF" '$6==d && $3=="0x2"{n++} END{print n+0}' /proc/net/arp)"
 echo "uptime=$(awk '{print int($1)}' /proc/uptime)"
