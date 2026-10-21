@@ -1,15 +1,16 @@
 # Repository Guidelines
 
-LCD status display (OpenWrt package `utr-lcd`) for the UniFi Travel Router Long-Range (UTR-LR, IPQ4018). C programs, BusyBox shell scripts, an OpenWrt package Makefile.
+LCD status display (OpenWrt packages `utr-lcd` and `luci-app-utr-lcd`) for the UniFi Travel Router Long-Range (UTR-LR, IPQ4018). C programs, BusyBox shell scripts, an OpenWrt package Makefile.
 
 ## Commands
 
-Build package (apk, snapshot): `tools/build-package.sh` -> `build/sdk-out/ipq40xx-generic-master/*.apk` (docker, first run downloads the SDK into a cached volume)
+Build packages (apk, snapshot): `tools/build-package.sh` -> `build/sdk-out/ipq40xx-generic-master/*.apk` (both packages) (docker, first run downloads the SDK into a cached volume)
 Build package (ipk, opkg releases): `tools/build-package.sh ipq40xx-generic-24.10.4` -> `build/sdk-out/ipq40xx-generic-24.10.4/*.ipk`
 Build C only (Linux, DRM headers needed): `make -C package/utr-lcd/src` (verified in alpine with `libdrm-dev`); hardware test programs: `make -C tools/extras`
 Build stock bundle from a firmware image: `tools/make-stock-bundle.sh fw/<firmware>.bin build/utr-ui-stock.tar.gz` (docker)
-Syntax-check scripts: `sh -n package/utr-lcd/files/*.sh package/utr-lcd/files/utr-lcd.init`
+Syntax-check scripts: `sh -n package/utr-lcd/files/*.sh package/utr-lcd/files/utr-lcd.init package/luci-app-utr-lcd/root/usr/libexec/utr-lcd/luci-status`
 Deploy to the router: `ssh root@192.168.1.1 'cat > /tmp/utr-lcd.apk' < build/sdk-out/ipq40xx-generic-master/utr-lcd-*.apk`, then `ssh root@192.168.1.1 'apk add --allow-untrusted --force-reinstall /tmp/utr-lcd.apk'`
+LuCI page: Services > LCD Display (`package/luci-app-utr-lcd`, view `htdocs/luci-static/resources/view/utr-lcd/settings.js`); it cannot be exercised headlessly without the router's LuCI password, so ask the user to open it after installing.
 Router logs: `ssh root@192.168.1.1 "logread | grep -E 'utr-lcd|stock-run|feed.sh'"`
 Service: `/etc/init.d/utr-lcd start|stop|restart` on the router; config in `/etc/config/utr-lcd`
 No unit tests exist. A change is verified by building the package, installing it, and checking processes and logs on the router; looking at the panel itself needs the user.

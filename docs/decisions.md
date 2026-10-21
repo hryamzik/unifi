@@ -30,6 +30,9 @@ The package works with the built-in renderer alone. The Ubiquiti-style UI is an 
 ### procd supervises everything
 `/etc/init.d/utr-lcd` starts either the native instance, or `ubusd` + `ulcmd` + `fb2drm` + `feed` as separate procd instances with respawn. Logs go to syslog (`logread`). The init script fails softly (log line) when `/dev/dri/card0` is missing.
 
+### LuCI app is a separate, pure-JS package
+`luci-app-utr-lcd` (arch `all`) holds only a form view over `/etc/config/utr-lcd`, a menu entry, an rpcd ACL and `/usr/libexec/utr-lcd/luci-status` (read-only JSON status, run through rpcd's file `exec` ACL like LuCI's own package manager helper). No rpcd plugin and no Lua/ucode, so it works on snapshot and 24.10. Applying settings relies on the init script's `procd_add_reload_trigger utr-lcd` (verified: `uci commit` + `reload_config` restarts the service with the new values). Uploading the stock bundle from the browser is deliberately not offered: it would run a root installer on an uploaded file.
+
 ### Package metadata
 - No hard dependency on `kmod-drm-panel-mipi-dbi`: it ships with the device image, and declaring it makes the SDK build the whole kernel. Runtime check instead.
 - `@TARGET_ipq40xx` is kept in the Makefile; `tools/build-package.sh` strips it only when an SDK image has a different target with the same CPU architecture (the 24.10.4 image is bcm2709, `arm_cortex-a7_neon-vfpv4`), so the resulting `.ipk` is binary-compatible with ipq40xx.

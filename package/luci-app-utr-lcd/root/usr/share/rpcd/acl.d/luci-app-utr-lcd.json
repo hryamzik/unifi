@@ -1,0 +1,14 @@
+{
+	"luci-app-utr-lcd": {
+		"description": "Grant access to the utr-lcd LCD display settings and status",
+		"read": {
+			"file": {
+				"/usr/libexec/utr-lcd/luci-status": [ "exec" ]
+			},
+			"uci": [ "utr-lcd" ]
+		},
+		"write": {
+			"uci": [ "utr-lcd" ]
+		}
+	}
+}

@@ -1,0 +1,14 @@
+{
+	"admin/services/utr-lcd": {
+		"title": "LCD Display",
+		"order": 60,
+		"action": {
+			"type": "view",
+			"path": "utr-lcd/settings"
+		},
+		"depends": {
+			"acl": [ "luci-app-utr-lcd" ],
+			"uci": { "utr-lcd": true }
+		}
+	}
+}

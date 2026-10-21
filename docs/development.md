@@ -4,6 +4,7 @@
 
 ```
 package/utr-lcd/        OpenWrt package (Makefile, src/ C sources, files/ runtime scripts + init + config)
+package/luci-app-utr-lcd/  LuCI settings/status page (view JS, menu.d, acl.d, status helper)
 tools/                  host tools: build-package.sh, make-stock-bundle.sh, extract_stock.py, commit.sh,
                         psf2h.py (font), rgb565_to_png.py (framebuffer dump -> png), extras/ (hardware tests)
 docs/                   decisions.md, development.md, stock-ui-notes.md

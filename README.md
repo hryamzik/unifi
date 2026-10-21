@@ -32,6 +32,13 @@ opkg install ./utr-lcd_*.ipk
 
 The service starts immediately and at boot. `service utr-lcd restart` after editing the config.
 
+### Optional: LuCI page
+
+`luci-app-utr-lcd` adds **Services > LCD Display**: a settings form for every option below and a live
+status panel (running mode, panel driver, stock bundle, uplink, WAN IP, VPN, clients). Install it the
+same way (`apk add --allow-untrusted ./luci-app-utr-lcd-*.apk` or `opkg install ./luci-app-utr-lcd_*.ipk`).
+Save & Apply restarts the display service.
+
 ### Optional: stock Ubiquiti look
 
 Ubiquiti's UI binaries are proprietary and cannot be redistributed, so build the bundle from a
@@ -76,7 +83,7 @@ Findings about the stock firmware are in `docs/stock-ui-notes.md`.
 ## Building
 
 ```sh
-tools/build-package.sh                                # snapshot SDK  -> build/sdk-out/*/utr-lcd-*.apk
+tools/build-package.sh                                # snapshot SDK  -> build/sdk-out/*/ (utr-lcd + luci-app-utr-lcd, .apk)
 tools/build-package.sh ipq40xx-generic-24.10.4        # opkg release -> .ipk
 make -C package/utr-lcd/src CC=...                    # just the C programs
 ```
