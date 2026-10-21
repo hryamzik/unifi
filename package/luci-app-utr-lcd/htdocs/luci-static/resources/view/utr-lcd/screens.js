@@ -28,6 +28,7 @@ var TYPES = {
 	sigbar:      { label: 'Signal (line bar)',     group: 'general', sizes: [12, 16, 24], def: 16 },
 	status:      { label: 'Online status',         group: 'general', sizes: [16, 24, 32], def: 16 },
 	fan:         { label: 'Signal (Wi-Fi fan)',    group: 'general', sizes: [24, 32, 48], def: 32 },
+	segbar:      { label: 'Signal (segment bar)',  group: 'general', sizes: [12, 16, 24], def: 16 },
 	clients:     { label: 'Client count',          group: 'general', sizes: [16, 24, 32], def: 24 },
 	wanip:       { label: 'WAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
 	lanip:       { label: 'LAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
@@ -50,7 +51,7 @@ var TYPES = {
 
 var DEFAULT_SCREENS = [
 	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, backfill: false,
-	  widgets: [ ['bars', 24], ['ssid', 24], ['dbm', 32], ['rule', 2], ['status', 16, true], ['clients', 24] ] },
+	  widgets: [ ['segbar', 16], ['ssid', 24], ['dbm', 32], ['rule', 2], ['status', 16, true], ['clients', 24] ] },
 	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, backfill: true,
 	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
 	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, backfill: true,
