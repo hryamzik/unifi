@@ -25,6 +25,7 @@ var TYPES = {
 	ssid:        { label: 'Network name',          group: 'general', sizes: [16, 24, 32], def: 24 },
 	dbm:         { label: 'Signal strength',       group: 'general', sizes: [16, 24, 32], def: 32 },
 	bars:        { label: 'Signal (bars)',         group: 'general', sizes: [16, 24, 32], def: 24 },
+	sigbar:      { label: 'Signal (line bar)',     group: 'general', sizes: [12, 16, 24], def: 16 },
 	dot:         { label: 'Online status (dot)',   group: 'general', sizes: [16, 24, 32], def: 16 },
 	clients:     { label: 'Client count',          group: 'general', sizes: [16, 24, 32], def: 24 },
 	wanip:       { label: 'WAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
@@ -48,7 +49,7 @@ var TYPES = {
 
 var DEFAULT_SCREENS = [
 	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
-	  widgets: [ ['ssid', 24], ['dbm', 32], ['clients', 24] ] },
+	  widgets: [ ['ssid', 24], ['bars', 24, true], ['dbm', 16], ['clients', 24] ] },
 	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
 	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
 	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
