@@ -20,7 +20,8 @@ define Package/luci-app-utr-lcd
 endef
 
 define Package/luci-app-utr-lcd/description
-  Settings and status page (Services > LCD Display) for the utr-lcd LCD status display.
+  Settings and status page (Services > LCD Display) and screens editor with live preview
+  (Services > LCD Screens) for the utr-lcd LCD status display.
 endef
 
 define Build/Configure
@@ -33,10 +34,13 @@ define Package/luci-app-utr-lcd/install
 	$(INSTALL_DIR) $(1)/usr/libexec/utr-lcd $(1)/usr/share/luci/menu.d $(1)/usr/share/rpcd/acl.d \
 		$(1)/www/luci-static/resources/view/utr-lcd
 	$(INSTALL_BIN) ./root/usr/libexec/utr-lcd/luci-status $(1)/usr/libexec/utr-lcd/luci-status
+	$(INSTALL_BIN) ./root/usr/libexec/utr-lcd/luci-preview $(1)/usr/libexec/utr-lcd/luci-preview
 	$(INSTALL_DATA) ./root/usr/share/luci/menu.d/luci-app-utr-lcd.json $(1)/usr/share/luci/menu.d/
 	$(INSTALL_DATA) ./root/usr/share/rpcd/acl.d/luci-app-utr-lcd.json $(1)/usr/share/rpcd/acl.d/
 	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/utr-lcd/settings.js \
 		$(1)/www/luci-static/resources/view/utr-lcd/settings.js
+	$(INSTALL_DATA) ./htdocs/luci-static/resources/view/utr-lcd/screens.js \
+		$(1)/www/luci-static/resources/view/utr-lcd/screens.js
 endef
 
 define Package/luci-app-utr-lcd/postinst

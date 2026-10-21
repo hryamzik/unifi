@@ -10,5 +10,17 @@
 			"acl": [ "luci-app-utr-lcd" ],
 			"uci": { "utr-lcd": true }
 		}
+	},
+	"admin/services/utr-lcd-screens": {
+		"title": "LCD Screens",
+		"order": 61,
+		"action": {
+			"type": "view",
+			"path": "utr-lcd/screens"
+		},
+		"depends": {
+			"acl": [ "luci-app-utr-lcd" ],
+			"uci": { "utr-lcd": true }
+		}
 	}
 }
