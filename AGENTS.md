@@ -11,7 +11,7 @@ Look at the panel yourself: `tools/lcd-shot.sh build/cam/<new-name>.jpg [PROG [A
 Build stock bundle from a firmware image: `tools/make-stock-bundle.sh fw/<firmware>.bin build/utr-ui-stock.tar.gz` (docker)
 Syntax-check scripts: `sh -n package/utr-lcd/files/*.sh package/utr-lcd/files/utr-lcd.init package/luci-app-utr-lcd/root/usr/libexec/utr-lcd/luci-status`
 Deploy to the router: `ssh root@192.168.1.1 'cat > /tmp/utr-lcd.apk' < build/sdk-out/ipq40xx-generic-master/utr-lcd-*.apk`, then `ssh root@192.168.1.1 'apk add --allow-untrusted --force-reinstall /tmp/utr-lcd.apk'`
-LuCI pages: Services > LCD Display (`package/luci-app-utr-lcd`, view `htdocs/luci-static/resources/view/utr-lcd/settings.js`) and Services > LCD Screens (`screens.js`, editor with preview from `/usr/libexec/utr-lcd/luci-preview`; its JS height table must match `widget_h` in `lcd-status.c`); it cannot be exercised headlessly without the router's LuCI password, so ask the user to open it after installing.
+LuCI page: Services > LCD Display (`package/luci-app-utr-lcd`) with Settings (`settings.js`) and Screens (`screens.js`, editor with preview from `/usr/libexec/utr-lcd/luci-preview`; its JS height table must match `widget_h` in `lcd-status.c`) tabs; it cannot be exercised headlessly without the router's LuCI password, so ask the user to open it after installing.
 Router logs: `ssh root@192.168.1.1 "logread | grep -E 'utr-lcd|stock-run|feed.sh'"`
 Service: `/etc/init.d/utr-lcd start|stop|restart` on the router; config in `/etc/config/utr-lcd`
 No unit tests exist. A change is verified by building the package, installing it, and checking processes and logs on the router; looking at the panel itself needs the user.

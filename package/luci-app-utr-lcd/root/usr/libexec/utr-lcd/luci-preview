@@ -5,7 +5,10 @@
 #
 # SCREEN  1-based screen number in CONF
 # DEMO    1 = made-up traffic and clients (the traffic sampler may not be running), 0 = live traffic file
-# CONF    the layout in the flat key=value format of /var/run/utr-lcd/screens.conf (unsaved editor state)
+# CONF    the layout in the flat key=value format of /var/run/utr-lcd/screens.conf (unsaved editor
+#         state), with lines separated by \037 (unit separator) instead of newlines: LuCI's
+#         exec_direct backslash-escapes whitespace in arguments, and this keeps the whole
+#         config one safe token whatever cgi-exec makes of an escaped newline
 # key=value  overrides of what collect.sh reports, for what-if previews (up_state=down, vpn_state=up, ...)
 #
 # Prints the picture as run-length text (see write_rle in lcd-status.c). Read-only; BusyBox ash.
@@ -17,7 +20,8 @@ T=/tmp/utr-lcd-preview.$$
 mkdir -p "$T" || exit 1
 trap 'rm -rf "$T"' EXIT INT TERM
 
-printf '%s\n' "$CONF" > "$T/screens.conf"
+printf '%s' "$CONF" | tr '\037' '\n' > "$T/screens.conf"
+printf '\n' >> "$T/screens.conf"
 : > "$T/ovr"
 for kv in "$@"; do
 	case "$kv" in [a-z]*=*) printf '%s\n' "$kv" >> "$T/ovr" ;; esac

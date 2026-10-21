@@ -225,7 +225,8 @@ return view.extend({
 		}
 
 		function runPreview() {
-			var my = ++seq, conf = flatten(main, screens), ov = overrides(), demo = preview.source === 'example' ? '1' : '0';
+			/* lines joined by \x1f, not \n: exec_direct escapes whitespace in arguments (see luci-preview) */
+			var my = ++seq, conf = flatten(main, screens).replace(/\n/g, '\x1f'), ov = overrides(), demo = preview.source === 'example' ? '1' : '0';
 			var chain = Promise.resolve();
 			screens.forEach(function(s, i) {
 				chain = chain.then(function() {
@@ -391,12 +392,16 @@ return view.extend({
 		]);
 		redraw();
 
-		return E([
+		/* LuCI's E() turns an array argument into elements one by one (createElement per item),
+		 * so only nodes may go in here - no empty strings or nulls as placeholders. */
+		var page = [
 			E('h2', {}, _('LCD Screens')),
-			E('div', { 'class': 'cbi-map-descr' }, _('Screens of the built-in LCD renderer: the screens rotate on their own dwell times, in the order below or by the playlist. Save & Apply restarts the display service.')),
-			stockActive ? E('div', { 'class': 'alert-message warning' }, _('The display currently uses the stock UniFi look, which has its own screens. Switch the display mode to "Built-in renderer" on the LCD Display page to use these.')) : '',
-			wrap
-		]);
+			E('div', { 'class': 'cbi-map-descr' }, _('Screens of the built-in LCD renderer: the screens rotate on their own dwell times, in the order below or by the playlist. Save & Apply restarts the display service.'))
+		];
+		if (stockActive)
+			page.push(E('div', { 'class': 'alert-message warning' }, _('The display currently uses the stock UniFi look, which has its own screens. Switch the display mode to "Built-in renderer" on the Settings tab to use these.')));
+		page.push(wrap);
+		return E(page);
 	},
 
 	handleSave: function() {

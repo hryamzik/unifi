@@ -20,8 +20,8 @@ define Package/luci-app-utr-lcd
 endef
 
 define Package/luci-app-utr-lcd/description
-  Settings and status page (Services > LCD Display) and screens editor with live preview
-  (Services > LCD Screens) for the utr-lcd LCD status display.
+  Settings and status page with a screens editor tab (live preview) under Services > LCD Display
+  for the utr-lcd LCD status display.
 endef
 
 define Build/Configure
