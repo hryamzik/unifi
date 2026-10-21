@@ -45,7 +45,7 @@ screen_section() {
 	config_get name      "$1" name "Screen"
 	config_get dwell     "$1" dwell 8
 	config_get_bool enabled "$1" enabled 1
-	config_get indicator "$1" indicator dot
+	config_get indicator "$1" indicator none
 	config_get_bool backfill "$1" backfill 1
 	config_get spacing   "$1" spacing auto
 	printf 'screen=%s\n' "$(echo "$name" | head -n 1)"

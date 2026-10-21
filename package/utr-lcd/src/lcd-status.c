@@ -2,7 +2,7 @@
  * utr-lcd-status - render router status on the UTR-LR LCD (built-in renderer).
  *
  * A screen is a vertical stack of widgets (SSID, signal, clients, IPs, VPN, uptime, ...) drawn over
- * an optional Wi-Fi signal backfill and topped by a status indicator. Several screens can be
+ * an optional Wi-Fi signal backfill; the online status is a widget like any other. Several screens can be
  * configured; they rotate on their own dwell times in playlist order, or one is pinned. The layout
  * comes from a flat key=value file (see conf_parse, written by the init script from /etc/config/utr-lcd);
  * without that file the built-in defaults are used, so the renderer works standalone.
@@ -339,10 +339,10 @@ static void res_sample(res_t *r, cpu_prev_t *cp)
 
 /* ---------------------------------------------------------------------------------- configuration */
 
-enum { W_SSID, W_DBM, W_BARS, W_SIGBAR, W_DOT, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
+enum { W_SSID, W_DBM, W_BARS, W_SIGBAR, W_FAN, W_STATUS, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
        W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
        W_CPU, W_RAM, W_FLASH, W_TEMP, W_MULTIWAN, W_ROW, W_NTYPES };
-enum { ST_DOT, ST_PILL, ST_NONE };
+enum { ST_DOT, ST_PILL, ST_NONE };   /* legacy "indicator" config values, parsed but no longer drawn */
 
 typedef struct { const char *name; int def_size; } wtype_t;
 static const wtype_t WTYPES[W_NTYPES] = {
@@ -350,7 +350,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_DBM]     = { "dbm", 32 },
 	[W_BARS]    = { "bars", 24 },           /* Wi-Fi signal as 5 ascending bars (Wi-Fi only); size = tallest bar */
 	[W_SIGBAR]  = { "sigbar", 16 },         /* Wi-Fi signal as a resource-style line bar; size >= 24: tall bar, text on top */
-	[W_DOT]     = { "dot", 16 },            /* online status as a dot, like the screen indicator but placeable */
+	[W_FAN]     = { "fan", 32 },            /* Wi-Fi signal as a fan icon (dot + arcs), Wi-Fi only */
+	[W_STATUS]  = { "status", 16 },         /* online status globe (was "dot" in early configs) */
 	[W_ROW]     = { "row", 0 },             /* sub-widgets side by side on one line (a+b+c in the config) */
 	[W_CLIENTS] = { "clients", 24 },
 	[W_WANIP]   = { "wanip", 16 },
@@ -397,10 +398,11 @@ typedef struct {
 
 static const char DEFAULT_CONF[] =
 	"fill_dim=30\nfill_edge=1\n"
-	"screen=Status\ndwell=8\nindicator=dot\nbackfill=1\nwidget=ssid:24\nwidget=bars:24+dbm:16\nwidget=clients:24\n"
-	"screen=Traffic\ndwell=8\nindicator=dot\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
+	"screen=Status\ndwell=8\nbackfill=0\nwidget=bars:24\nwidget=ssid:24\nwidget=dbm:32\nwidget=rule:2\n"
+	"widget=status:16+clients:24\n"
+	"screen=Traffic\ndwell=8\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
 	"widget=usagebar:12\nwidget=legend:4\n"
-	"screen=Details\ndwell=5\nindicator=dot\nbackfill=1\n"
+	"screen=Details\ndwell=5\nbackfill=1\n"
 	"widget=wanip:16\nwidget=lanip:16\nwidget=vpn:16\nwidget=uptime:16\n"
 	"widget=cpu:16\nwidget=ram:16\nwidget=flash:16\nwidget=temp:16\n";
 
@@ -444,6 +446,7 @@ static void conf_line(config_t *c, char *line)
 			char *colon = strchr(tok, ':');
 			int size = 0;
 			if (colon) { *colon++ = 0; size = atoi(colon); }
+			if (!strcmp(tok, "dot")) tok = "status";      /* name before the globe icon replaced the dot */
 			for (int t = 0; t < W_NTYPES; t++)
 				if (!strcmp(tok, WTYPES[t].name) && t != W_ROW) {
 					specs[n].type = t;
@@ -847,6 +850,45 @@ static void draw_clock(lcd_t *l, int x, int y, uint32_t c)
 	lcd_fill(l, cx - 1, cy - 1, 6, 2, c);
 }
 
+/* Globe for the online-status widget: outline, equator, one meridian, two parallels. */
+static void draw_globe(lcd_t *l, int cx, int cy, int r, uint32_t c)
+{
+	for (int a = 0; a < 96; a++) {
+		double t = a * M_PI / 48;
+		lcd_fill(l, cx + (int)lround(r * cos(t)) - 1, cy + (int)lround(r * sin(t)) - 1, 2, 2, c);
+	}
+	lcd_fill(l, cx - r, cy - 1, 2 * r, 2, c);
+	for (int a = 0; a < 48; a++) {
+		double t = a * M_PI / 24;
+		lcd_fill(l, cx + (int)lround(r / 2 * cos(t)) - 1, cy + (int)lround(r * sin(t)) - 1, 2, 2, c);
+	}
+	if (r >= 12) {          /* parallels only where they do not mush together */
+		int pw = (int)lround(r * 0.86);
+		lcd_fill(l, cx - pw, cy - r / 2 - 1, 2 * pw, 2, c);
+		lcd_fill(l, cx - pw, cy + r / 2 - 1, 2 * pw, 2, c);
+	}
+}
+
+/* Wi-Fi fan: a dot and up to 4 arcs above it. Lit arcs by signal quality; with `shadow` set,
+ * every stroke is first drawn offset in dark colour (readable on the bright signal backfill). */
+static void draw_fan(lcd_t *l, int cx, int base, int size, int pct, uint32_t col, uint32_t dimc, int shadow)
+{
+	int lit = (pct * 4 + 50) / 100, thick = size >= 32 ? 3 : 2;
+	for (int pass = shadow ? 0 : 1; pass < 2; pass++) {
+		uint32_t lc = pass ? col : RGB(12, 16, 12), dc = pass ? dimc : RGB(12, 16, 12);
+		int o = pass ? 0 : 1;
+		lcd_disc(l, cx + o, base - size / 8 + o, size / 10 < 2 ? 2 : size / 10, pct > 0 ? lc : dc);
+		for (int i = 0; i < 4; i++) {
+			int r = size * (38 + i * 20) / 100;
+			uint32_t c = i < lit ? lc : dc;
+			for (int a = 0; a <= 32; a++) {
+				double t = M_PI * (-0.89 + 0.78 * a / 32.0);   /* sweep above the dot (screen y is down) */
+				lcd_fill(l, cx + (int)lround(r * cos(t)) + o, base - size / 8 + (int)lround(r * sin(t)) + o, thick, thick, c);
+			}
+		}
+	}
+}
+
 #define UPL_COLORS 3
 static const uint32_t UPL_COLOR[UPL_COLORS] = { RGB(0, 150, 255), RGB(255, 150, 30), RGB(230, 70, 200) };
 
@@ -912,13 +954,14 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 		return m;
 	}
 	switch (wd->type) {
-	case W_DOT: return wd->size + PAD;
+	case W_STATUS: return wd->size + PAD;
 	case W_DBM: {
 		int wifi = c->s->has_signal && !strcmp(c->s->up_type, "wifi");
 		return !strcmp(c->s->up_state, "up") && (wifi || c->s->speed > 0) ? wd->size + PAD : 0;
 	}
 	case W_BARS:
 	case W_SIGBAR:
+	case W_FAN:
 		return !strcmp(c->s->up_state, "up") && c->s->has_signal && !strcmp(c->s->up_type, "wifi") ? wd->size + PAD : 0;
 	case W_WANIP: return c->s->wan_ip[0] ? wd->size + PAD : 0;
 	case W_LANIP: return c->s->lan_ip[0] ? wd->size + PAD : 0;
@@ -979,8 +1022,18 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		int p = sig_pct(s->signal), nb = 5, lit = p <= 0 ? 0 : (p * nb + 99) / 100;
 		uint32_t col = c->backfill ? C_WHITE : p >= 50 ? C_OK : p >= 25 ? C_WARN : C_BAD;
 		int bw = wd->size >= 24 ? 6 : 4, bg = 3, bx = (sp.x0 + sp.x1 + 1) / 2 - (nb * bw + (nb - 1) * bg) / 2, base = y + (h + wd->size) / 2;
-		for (int i = 0; i < nb; i++)
-			lcd_fill(l, bx + i * (bw + bg), base - wd->size * (i + 1) / nb, bw, wd->size * (i + 1) / nb, i < lit ? col : C_TRACK);
+		for (int i = 0; i < nb; i++) {
+			int bh = wd->size * (i + 1) / nb;
+			if (c->backfill)          /* white bars on the bright fill need a dark outline to read */
+				lcd_fill(l, bx + i * (bw + bg) - 1, base - bh - 1, bw + 2, bh + 2, RGB(12, 16, 12));
+			lcd_fill(l, bx + i * (bw + bg), base - bh, bw, bh, i < lit ? col : C_TRACK);
+		}
+		break;
+	}
+	case W_FAN: {
+		int p = sig_pct(s->signal);
+		uint32_t col = c->backfill ? C_WHITE : p >= 50 ? C_OK : p >= 25 ? C_WARN : C_BAD;
+		draw_fan(l, (sp.x0 + sp.x1 + 1) / 2, y + (h + wd->size) / 2, wd->size, p, col, C_TRACK, c->backfill);
 		break;
 	}
 	case W_SIGBAR: {
@@ -1066,9 +1119,26 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		lcd_draw(l, vf, sp.x1 + 1 - lcd_text_w(vf, buf, 1), y + (h - vf->h) / 2, buf, c->res->temp >= 85 ? C_BAD : c->res->temp >= 75 ? C_WARN : C_WHITE, LCD_TRANSPARENT, 1);
 		break;
 	}
-	case W_DOT: {
-		uint32_t col = !strcmp(c->state, "ready") ? C_OK : !strcmp(c->state, "noInternet") ? C_WARN : C_BAD;
-		lcd_disc(l, (sp.x0 + sp.x1 + 1) / 2, y + h / 2, wd->size / 2, col);
+	case W_STATUS: {
+		/* Globe: green online, amber with "!" no internet, red slashed no uplink.
+		 * With a full line it also carries the words; in a shared line the icon alone changes. */
+		int ready = !strcmp(c->state, "ready"), noint = !strcmp(c->state, "noInternet");
+		uint32_t col = ready ? C_OK : noint ? C_WARN : C_BAD;
+		const char *text = ready ? "Online" : noint ? "No internet" : "No uplink";
+		int r = wd->size / 2, cy = y + h / 2, cx = (sp.x0 + sp.x1 + 1) / 2;
+		if (sp.x1 - sp.x0 + 1 >= 90) {
+			int tw = lcd_text_w(&FONT_T16B, text, 1), x0 = cx - (wd->size + 6 + tw) / 2;
+			cx = x0 + r;
+			lcd_draw(l, &FONT_T16B, x0 + wd->size + 6, cy - FONT_T16B.h / 2, text, col, LCD_TRANSPARENT, 1);
+		}
+		draw_globe(l, cx, cy, r - 1, col);
+		if (!ready && noint && sp.x1 - sp.x0 + 1 < 90) {          /* "!" cut into the globe */
+			lcd_fill(l, cx - 1, cy - 4, 3, 6, C_BG);
+			lcd_fill(l, cx - 1, cy + 3, 3, 3, C_BG);
+		}
+		if (!ready && !noint)                                     /* slash across the globe */
+			for (int i = -r - 3; i <= r + 3; i++)
+				lcd_fill(l, cx + i, cy - i - 1, 3, 3, col);
 		break;
 	}
 	}
@@ -1104,17 +1174,9 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			draw_backfill(l, sig_pct(wf[i]), cf->fill_dim, cf->fill_edge, l->w * i / nw, l->w * (i + 1) / nw);
 	}
 
-	/* status indicator: dot, grown into a text banner when something is wrong */
-	int bad = strcmp(state, "ready") != 0, top = w->y0 + 4;
-	uint32_t col = !strcmp(state, "noInternet") ? C_WARN : bad ? C_BAD : C_OK;
-	const char *text = !strcmp(state, "noUplink") ? "NO UPLINK" : !strcmp(state, "noInternet") ? "NO INTERNET" : "ONLINE";
-	if (sc->indicator == ST_PILL || (sc->indicator == ST_DOT && bad)) {
-		draw_pill(l, w, 6, text, col);
-		top = 6 + 22 + 4;
-	} else if (sc->indicator == ST_DOT) {
-		lcd_disc(l, w->cx, 10, 5, col);
-		top = 10 + 5 + 4;
-	}
+	/* No panel indicator any more: the online status is a widget (status) placed like any other,
+	 * so it can also share a line with e.g. the client count. Content starts at the top margin. */
+	int top = w->y0 + 4;
 
 	/* widgets: stacked, spare room spread evenly (at most 14 px between them) */
 	int hs[MAX_WIDGETS], nvis = 0, total = 0, bottom = w->y1 - 3;
