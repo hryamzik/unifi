@@ -18,6 +18,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#ifndef LCD_MOCK
 #if defined(__has_include) && __has_include(<drm/drm.h>)
 #include <drm/drm.h>        /* kernel UAPI headers (OpenWrt toolchain) */
 #include <drm/drm_mode.h>
@@ -25,8 +26,9 @@
 #include <drm.h>            /* libdrm's copy (-I/usr/include/libdrm) */
 #include <drm_mode.h>
 #endif
+#endif /* !LCD_MOCK */
 
-#include "font8x16.h"
+#include "fonts.h"
 
 #define RGB(r, g, b) (((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b))
 #define LCD_BLACK RGB(0, 0, 0)
@@ -45,6 +47,7 @@ typedef struct {
 	int dirty_warned;
 } lcd_t;
 
+#ifndef LCD_MOCK
 static inline int lcd__ioctl(int fd, unsigned long req, void *arg)
 {
 	int r;
@@ -128,6 +131,21 @@ static int lcd_open(lcd_t *l, const char *dev, int flip_x, int flip_y)
 	return 0;
 }
 
+#else  /* LCD_MOCK: no hardware; lcd_flush writes the raw (as scanned) panel image as PPM to $LCD_MOCK_OUT */
+static int lcd_open(lcd_t *l, const char *dev, int flip_x, int flip_y)
+{
+	(void)dev;
+	memset(l, 0, sizeof(*l));
+	l->phys_w = 136; l->phys_h = 240; l->pitch = 136;
+	l->size = (size_t)l->pitch * l->phys_h * 4;
+	l->px = calloc(1, l->size);
+	l->w = l->phys_w; l->h = l->phys_h;
+	l->flip_x = flip_x; l->flip_y = flip_y;
+	return l->px ? 0 : -1;
+}
+
+#endif
+
 static inline void lcd_pixel(lcd_t *l, int x, int y, uint32_t c)
 {
 	if (x < 0 || y < 0 || x >= l->w || y >= l->h) return;
@@ -143,26 +161,66 @@ static void lcd_fill(lcd_t *l, int x0, int y0, int w, int h, uint32_t c)
 			lcd_pixel(l, x, y, c);
 }
 
-/* Draw one character cell; scale>=1 magnifies the glyph. */
-static void lcd_char(lcd_t *l, int x, int y, char ch, uint32_t fg, uint32_t bg, int scale)
+#define LCD_TRANSPARENT 0xFF000000u    /* as bg: leave the background untouched */
+
+/* Draw one glyph of font f; scale>=1 magnifies it. bg may be LCD_TRANSPARENT. */
+static void lcd_glyph(lcd_t *l, const font_t *f, int x, int y, char ch, uint32_t fg, uint32_t bg, int scale)
 {
 	if (ch < 32 || ch > 126) ch = '?';
-	const unsigned char *g = font_data[ch - 32];
-	for (int row = 0; row < FONT_H; row++)
-		for (int col = 0; col < FONT_W; col++) {
-			uint32_t c = (g[row] & (0x80 >> col)) ? fg : bg;
-			lcd_fill(l, x + col * scale, y + row * scale, scale, scale, c);
+	const unsigned char *g = f->data + (ch - 32) * f->h * f->stride;
+	for (int row = 0; row < f->h; row++)
+		for (int col = 0; col < f->w; col++) {
+			int on = g[row * f->stride + col / 8] & (0x80 >> (col % 8));
+			if (!on && bg == LCD_TRANSPARENT) continue;
+			lcd_fill(l, x + col * scale, y + row * scale, scale, scale, on ? fg : bg);
 		}
 }
 
-/* Draw a string; returns the x position after the last char. */
-static inline int lcd_text(lcd_t *l, int x, int y, const char *s, uint32_t fg, uint32_t bg, int scale)
+/* Width in pixels of s in font f. */
+static inline int lcd_text_w(const font_t *f, const char *s, int scale)
 {
-	for (; *s; s++, x += FONT_W * scale)
-		lcd_char(l, x, y, *s, fg, bg, scale);
+	return (int)strlen(s) * f->w * scale;
+}
+
+/* Draw a string with font f; returns the x position after the last char. */
+static int lcd_draw(lcd_t *l, const font_t *f, int x, int y, const char *s, uint32_t fg, uint32_t bg, int scale)
+{
+	for (; *s; s++, x += f->w * scale)
+		lcd_glyph(l, f, x, y, *s, fg, bg, scale);
 	return x;
 }
 
+/* Simple 8x16 text (kept for the test programs). */
+static inline int lcd_text(lcd_t *l, int x, int y, const char *s, uint32_t fg, uint32_t bg, int scale)
+{
+	return lcd_draw(l, &FONT_T16, x, y, s, fg, bg, scale);
+}
+
+/* Filled rounded rectangle, corner radius r (pixel-centre test against the corner circle). */
+static void lcd_rrect(lcd_t *l, int x, int y, int w, int h, int r, uint32_t c)
+{
+	if (r > w / 2) r = w / 2;
+	if (r > h / 2) r = h / 2;
+	for (int row = 0; row < h; row++) {
+		int rr = row < h - 1 - row ? row : h - 1 - row;   /* distance from nearest horizontal edge */
+		int inset = 0;
+		if (rr < r) {
+			int t = 2 * (r - rr) - 1;
+			while (inset < r && (2 * (r - inset) - 1) * (2 * (r - inset) - 1) + t * t > 4 * r * r) inset++;
+		}
+		lcd_fill(l, x + inset, y + row, w - 2 * inset, 1, c);
+	}
+}
+
+/* Filled circle with centre (cx,cy) and radius r. */
+static void lcd_disc(lcd_t *l, int cx, int cy, int r, uint32_t c)
+{
+	for (int dy = -r; dy <= r; dy++)
+		for (int dx = -r; dx <= r; dx++)
+			if (dx * dx + dy * dy <= r * r + r / 2) lcd_pixel(l, cx + dx, cy + dy, c);
+}
+
+#ifndef LCD_MOCK
 /* Push the buffer to the panel. Warns once on failure. */
 static void lcd_flush(lcd_t *l)
 {
@@ -178,5 +236,22 @@ static void lcd_close(lcd_t *l)
 	if (l->px && l->px != MAP_FAILED) munmap(l->px, l->size);
 	if (l->fd > 0) close(l->fd);
 }
+
+#else
+static void lcd_flush(lcd_t *l)
+{
+	const char *out = getenv("LCD_MOCK_OUT");
+	FILE *f = out ? fopen(out, "wb") : NULL;
+	if (!f) return;
+	fprintf(f, "P6\n%d %d\n255\n", l->phys_w, l->phys_h);
+	for (int i = 0; i < l->phys_w * l->phys_h; i++) {
+		uint32_t c = l->px[i];
+		fputc(c >> 16, f); fputc(c >> 8, f); fputc(c, f);
+	}
+	fclose(f);
+}
+
+static void lcd_close(lcd_t *l) { free(l->px); }
+#endif
 
 #endif /* LCD_H */

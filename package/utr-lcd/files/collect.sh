@@ -10,6 +10,7 @@
 #   up_name    SSID (wifi) or "Ethernet"
 #   up_detail  signal (wifi) / link speed (eth) / device name
 #   wan_ip     IPv4 address of the uplink device
+#   inet       ok|fail   a ping to 1.1.1.1 got through (only printed when up_state=up)
 #   vpn_state  up|down|none
 #   vpn_name   VPN interface name
 #   clients    LAN clients (complete ARP entries on the LAN bridge)
@@ -35,6 +36,8 @@ if [ -n "$up_dev" ]; then
 	wan_ip=$(ip -4 addr show dev "$up_dev" 2>/dev/null | awk '/inet /{sub("/.*","",$2); print $2; exit}')
 	echo "wan_ip=$wan_ip"
 	echo "up_dev=$up_dev"
+	# internet reachability (one probe per run; consumers decide how many failures matter)
+	if ping -c1 -W1 1.1.1.1 >/dev/null 2>&1; then echo "inet=ok"; else echo "inet=fail"; fi
 	info=$(iwinfo "$up_dev" info 2>/dev/null)
 	if echo "$info" | grep -q 'Mode: Client'; then
 		echo "up_type=wifi"

@@ -9,10 +9,10 @@ SHIM     = utr-lcd-fbshim.so
 
 all: $(PROGS) $(SHIM)
 
-utr-lcd-status: lcd-status.c lcd.h font8x16.h
+utr-lcd-status: lcd-status.c lcd.h fonts.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ lcd-status.c
 
-utr-lcd-fb2drm: fb2drm.c lcd.h font8x16.h
+utr-lcd-fb2drm: fb2drm.c lcd.h fonts.h
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ fb2drm.c
 
 $(SHIM): fbshim.c

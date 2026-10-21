@@ -3,8 +3,8 @@
 CC ?= cc
 CFLAGS ?= -O2
 CFLAGS += -Wall -I../../package/utr-lcd/src -I/usr/include/libdrm
-all: lcdtest lcdorient lcdframes
+all: lcdtest lcdorient lcdframes lcdgrid
 %: %.c ../../package/utr-lcd/src/lcd.h
 	$(CC) $(CFLAGS) -o $@ $<
 clean:
-	rm -f lcdtest lcdorient lcdframes
+	rm -f lcdtest lcdorient lcdframes lcdgrid
