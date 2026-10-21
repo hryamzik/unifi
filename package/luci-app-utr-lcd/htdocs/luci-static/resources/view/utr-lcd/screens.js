@@ -348,11 +348,9 @@ return view.extend({
 
 			var canvas = E('canvas', { 'width': 136, 'height': 240, 'style': 'width:' + (136 * SCALE) + 'px; height:' + (240 * SCALE) + 'px; image-rendering:pixelated' });
 			var note = E('div', { 'style': 'color:#d33; max-width:' + (136 * SCALE) + 'px' });
-			canvases[si] = canvas;
-			notes[si] = note;
+			if (!sc._folded) { canvases[si] = canvas; notes[si] = note; }
 
-			return E('div', { 'class': 'cbi-section', 'style': 'border:1px solid #bbb; border-radius:4px; padding:10px; margin-bottom:14px; opacity:' + (sc.enabled ? 1 : 0.7) }, [
-				E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:8px' }, [
+			var header = E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:' + (sc._folded ? '0' : '8px') }, [
 					E('strong', {}, _('Screen %d').format(si + 1)),
 					text(sc.name, function(v) { sc.name = v; schedulePreview(); }, 130),
 					E('span', {}, [ text(sc.dwell, function(v) {
@@ -367,9 +365,22 @@ return view.extend({
 					btn('\u2193', function() { move(screens, si, 1); redraw(); }, si === screens.length - 1, _('Move screen down')),
 					btn(_('Remove screen'), function() {
 						if (screens.length > 1 && confirm(_('Remove this screen?'))) { screens.splice(si, 1); redraw(); }
-					}, screens.length <= 1)
-				]),
-				E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start' }, [
+					}, screens.length <= 1),
+					btn(_('Duplicate'), function() {
+						if (screens.length >= 12) return;
+						screens.splice(si + 1, 0, {
+							name: sc.name + ' ' + _('copy'), dwell: sc.dwell, spacing: sc.spacing, enabled: sc.enabled,
+							backfill: sc.backfill, _folded: false,
+							widgets: sc.widgets.map(function(w) { return w.slice(); })
+						});
+						redraw();
+					}, screens.length >= 12, _('Copy this screen below')),
+					btn(sc._folded ? _('Unfold') : _('Fold'), function() { sc._folded = !sc._folded; redraw(); }, false,
+						sc._folded ? _('Show widgets and preview') : _('Hide widgets and preview'))
+				]);
+
+			var parts = [ header ];
+			if (!sc._folded) parts.push(E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start' }, [
 					E('div', { 'style': 'flex:1 1 300px; min-width:0' }, [
 						sc.widgets.length ? E('div', { 'style': 'overflow-x:auto' }, E('table', { 'class': 'table', 'style': 'width:100%' }, [
 							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Join next')), E('th', { 'class': 'th' }, _('Wrap')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
@@ -380,8 +391,8 @@ return view.extend({
 							_('The signal background colours the screen from the bottom by the Wi-Fi signal (red when poor, green when full). It is only used for Wi-Fi uplinks; with several Wi-Fi uplinks the screen is split horizontally between them.')) : ''
 					]),
 					E('div', { 'style': 'flex:none' }, [ canvas, note ])
-				])
-			]);
+				]));
+			return E('div', { 'class': 'cbi-section', 'style': 'border:1px solid #bbb; border-radius:4px; padding:10px; margin-bottom:14px; opacity:' + (sc.enabled ? 1 : 0.7) }, parts);
 		}
 
 		function globalsView() {
