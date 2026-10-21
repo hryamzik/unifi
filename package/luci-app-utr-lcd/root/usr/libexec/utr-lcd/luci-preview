@@ -31,14 +31,24 @@ TRAFFIC=/var/run/utr-lcd/traffic
 if [ "$DEMO" = 1 ]; then
 	TRAFFIC=$T/traffic
 	now=$(cut -d' ' -f1 /proc/uptime)
+	# simulated split of the demo traffic between the two WANs (tsim= override from the editor)
+	TSIM=eth
+	for kv in "$@"; do case "$kv" in tsim=*) TSIM=${kv#tsim=} ;; esac; done
+	case "$TSIM" in
+		wifi)     W0D=9800000;  W0U=1400000; W1D=700000;   W1U=300000 ;;
+		bal)      W0D=5200000;  W0U=800000;  W1D=7300000;  W1U=900000 ;;
+		wifionly) W0D=11800000; W0U=1700000; W1D=0;        W1U=0 ;;
+		ethonly)  W0D=0;        W0U=0;       W1D=12500000; W1U=1800000 ;;
+		*)        W0D=2100000;  W0U=600000;  W1D=10400000; W1U=1200000 ;;
+	esac
 	cat > "$TRAFFIC" <<DEMO
 t=$now
-down_bps=12500000
-up_bps=1800000
+down_bps=$((W0D + W1D))
+up_bps=$((W0U + W1U))
 down_total=3200000000
 up_total=500000000
-uplink=phy0-sta0|2100000|600000|2000000000|300000000
-uplink=eth0|10400000|1200000|1200000000|200000000
+uplink=phy0-sta0|$W0D|$W0U|2000000000|300000000
+uplink=wan|$W1D|$W1U|1200000000|200000000
 client=de:f6:15:22:44:8d|iPhone|5200000|1800000000|1|-25|4200000|1000000|1500000000|300000000
 client=7c:0a:3f:ef:9f:60|Romans-Air|4900000|1100000000|1|-17|3900000|1000000|900000000|200000000
 client=LAN|LAN|1600000|300000000|1||1300000|300000|240000000|60000000

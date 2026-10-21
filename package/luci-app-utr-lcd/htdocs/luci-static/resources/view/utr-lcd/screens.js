@@ -193,7 +193,7 @@ var EXAMPLE = [
 	'up_state=up', 'up_type=wifi', 'up_name=iNomad', 'up_signal=-52', 'up_speed=144', 'wan_ip=192.168.87.221', 'lan_ip=192.168.1.1',
 	'inet=ok', 'vpn_state=up', 'vpn_name=wg0', 'clients=3', 'uptime=9163',
 	'up0_dev=phy0-sta0', 'up0_type=wifi', 'up0_name=iNomad', 'up0_signal=-52', 'up0_speed=144', 'up0_metric=10',
-	'up1_dev=eth0', 'up1_type=eth', 'up1_name=Ethernet', 'up1_speed=1000', 'up1_metric=20', 'ups=2'
+	'up1_dev=wan', 'up1_type=eth', 'up1_name=Ethernet', 'up1_speed=1000', 'up1_metric=20', 'ups=2'
 ];
 
 /* ---- end of the model ---- */
@@ -251,7 +251,7 @@ return view.extend({
 					widgets: s.widgets.map(function(w) { return w.slice(); }) };
 			});
 
-		var preview = { source: 'live', scenario: 'none' };
+		var preview = { source: 'live', scenario: 'none', tsim: 'eth' };
 		var canvases = [], notes = [];
 		var container = E('div', {});
 		var globals = E('div', {});
@@ -281,6 +281,7 @@ return view.extend({
 		/* ---- preview ---- */
 		function overrides() {
 			var o = preview.source === 'example' ? EXAMPLE.slice() : [];
+			if (preview.source === 'example') o.push('tsim=' + preview.tsim);
 			return o.concat(SCENARIOS[preview.scenario] || []);
 		}
 
@@ -403,7 +404,7 @@ return view.extend({
 						redraw();
 					}, 50), ' ', _('s on screen') ]),
 					check(sc.enabled, function(v) { sc.enabled = v; redraw(); }, _('In rotation')),
-					select([ [ 'auto', _('Spacing: auto') ], [ '1', _('Spacing: 1 px') ], [ '2', _('Spacing: 2 px') ], [ '4', _('Spacing: 4 px') ], [ '6', _('Spacing: 6 px') ], [ '8', _('Spacing: 8 px') ], [ '12', _('Spacing: 12 px') ], [ '18', _('Spacing: 18 px') ] ], sc.spacing, function(v) { sc.spacing = v; redraw(); }),
+					select([ [ 'auto', _('Spacing: auto') ], [ '0', _('Spacing: 0 px') ], [ '1', _('Spacing: 1 px') ], [ '2', _('Spacing: 2 px') ], [ '4', _('Spacing: 4 px') ], [ '6', _('Spacing: 6 px') ], [ '8', _('Spacing: 8 px') ], [ '12', _('Spacing: 12 px') ], [ '18', _('Spacing: 18 px') ] ], sc.spacing, function(v) { sc.spacing = v; redraw(); }),
 					check(sc.backfill, function(v) { sc.backfill = v; redraw(); }, _('Signal background')),
 					btn('\u2191', function() { move(screens, si, -1); redraw(); }, si === 0, _('Move screen up')),
 					btn('\u2193', function() { move(screens, si, 1); redraw(); }, si === screens.length - 1, _('Move screen down')),
@@ -466,6 +467,8 @@ return view.extend({
 					select([ [ 'none', _('As is') ], [ 'weak', _('What if: weak Wi-Fi') ], [ 'longssid', _('What if: long Wi-Fi name') ], [ 'ethernet', _('What if: wired uplink') ], [ 'nouplink', _('What if: no uplink') ],
 						[ 'nointernet', _('What if: no internet') ], [ 'vpnup', _('What if: VPN connected') ], [ 'vpndown', _('What if: VPN down') ], [ 'novpn', _('What if: no VPN') ] ],
 						preview.scenario, function(v) { preview.scenario = v; schedulePreview(); }),
+					select([ [ 'wifi', _('WAN traffic: Wi-Fi mostly') ], [ 'bal', _('WAN traffic: balanced') ], [ 'eth', _('WAN traffic: Ethernet mostly') ], [ 'wifionly', _('WAN traffic: Wi-Fi only') ], [ 'ethonly', _('WAN traffic: Ethernet only') ] ],
+						preview.tsim, function(v) { preview.tsim = v; schedulePreview(); }),
 					E('small', { 'style': 'opacity:.7' }, _('The preview is drawn by the router itself with the settings on this page, saved or not. The rounded corners are cut off by the bezel.'))
 				])
 			]);
