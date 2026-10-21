@@ -453,8 +453,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_PLAYLIST 32
 
 #define MAX_SUB 3
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split, graph; } wspec_t;   /* bg/fit/peak/split: legend; cores: cpu; layout/generic/noname/noicon: uplinks; graph: cpuram */
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split, graph; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split, graph, stick; } wspec_t;   /* bg/fit/peak/split: legend; cores: cpu; layout/generic/noname/noicon: uplinks; graph: cpuram */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval, peak, split, graph, stick; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill, debug;
@@ -538,6 +538,7 @@ static void conf_line(config_t *c, char *line)
 					specs[n].peak = colon && strchr(colon, 'p') ? 1 : 0;   /* legend:4b4p: bar scaled by the peak rate seen, not the current max */
 					specs[n].split = colon && strchr(colon, 'x') ? 1 : 0;   /* legend:4b4x: bar split into upload (thin, top) and download */
 					specs[n].graph = colon && strchr(colon, 'G') ? (strchr(colon, 'H') ? 2 : 1) : 0;   /* cpuram:12G graphs + percents, 12GH graphs only */
+					specs[n].stick = colon && strchr(colon, 'B') ? 1 : 0;   /* any widget:16B: stick to the bottom of the screen */
 					specs[n].fit = colon && strchr(colon, 'F') ? 2 : colon && strchr(colon, 'f') ? 1 : 0;   /* legend fit: f gentle, F compact */
 					if (colon) {   /* legend background: b0..b5 (none speed total signal signal+speed signal+total) */
 						const char *b = strchr(colon, 'b');
@@ -563,6 +564,7 @@ static void conf_line(config_t *c, char *line)
 			s->w[s->nw].peak = specs[0].peak;
 			s->w[s->nw].split = specs[0].split;
 			s->w[s->nw].graph = specs[0].graph;
+			s->w[s->nw].stick = specs[0].stick;
 			s->nw++;
 		} else if (n > 1) {
 			widget_t *wd = &s->w[s->nw++];
@@ -1543,7 +1545,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
 		int m = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split, .graph = wd->sub[i].graph };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split, .graph = wd->sub[i].graph, .stick = wd->sub[i].stick };
 			int hh = widget_h(&t, c);
 			if (hh > m) m = hh;
 		}
@@ -1620,12 +1622,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		/* visible members get equal cells of the span, each drawn centred in its cell */
 		int vis[MAX_SUB], nv = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split, .graph = wd->sub[i].graph };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval, .peak = wd->sub[i].peak, .split = wd->sub[i].split, .graph = wd->sub[i].graph, .stick = wd->sub[i].stick };
 			if (widget_h(&t, c)) vis[nv++] = i;
 		}
 		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
 		for (int k = 0; k < nv; k++) {
-			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon, .showval = wd->sub[vis[k]].showval, .peak = wd->sub[vis[k]].peak, .split = wd->sub[vis[k]].split, .graph = wd->sub[vis[k]].graph };
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon, .showval = wd->sub[vis[k]].showval, .peak = wd->sub[vis[k]].peak, .split = wd->sub[vis[k]].split, .graph = wd->sub[vis[k]].graph, .stick = wd->sub[vis[k]].stick };
 			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
 			widget_draw_sp(l, w, &t, c, y, h, cell);
 		}
@@ -1861,7 +1863,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			for (int j = 0; j < sc->w[i].nsub; j++) {
 				int st = sc->w[i].sub[j].type;
 				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
-					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon, .showval = sc->w[i].sub[j].showval, .peak = sc->w[i].sub[j].peak, .split = sc->w[i].sub[j].split, .graph = sc->w[i].sub[j].graph };
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon, .showval = sc->w[i].sub[j].showval, .peak = sc->w[i].sub[j].peak, .split = sc->w[i].sub[j].split, .graph = sc->w[i].sub[j].graph, .stick = sc->w[i].sub[j].stick };
 					widget_draw(NULL, w, &mt, &c, top, hs[i]);
 				}
 			}
@@ -1876,13 +1878,25 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			if (gap < 2) gap = 2;
 			if (gap > 14) gap = 14;
 		}
-		/* stacks start at the top (auto leaves one gap above); spare room collects at the bottom */
+		/* stacks start at the top (auto leaves one gap above); spare room collects at the bottom,
+		 * except widgets flagged stick (B): they pin as a group to the bottom edge and the
+		 * spare room opens above them */
 		int y = sc->spacing >= 0 ? top : top + gap;
 		if (y < top) y = top;
+		int stick_h = 0, nstick = 0;
+		for (int i = 0; i < sc->nw; i++) if (hs[i] && sc->w[i].stick) { stick_h += hs[i]; nstick++; }
+		if (nstick) stick_h += gap * (nstick - 1);
+		int stick_y = bottom - stick_h;
 		for (int i = 0; i < sc->nw; i++) {
-			if (!hs[i]) continue;
+			if (!hs[i] || sc->w[i].stick) continue;
 			widget_draw(l, w, &sc->w[i], &c, y, hs[i]);
 			y += hs[i] + gap;
+		}
+		if (stick_y < y) stick_y = y;          /* no room to pin: continue the stack instead */
+		for (int i = 0; i < sc->nw; i++) {
+			if (!hs[i] || !sc->w[i].stick) continue;
+			widget_draw(l, w, &sc->w[i], &c, stick_y, hs[i]);
+			stick_y += hs[i] + gap;
 		}
 	}
 	if (sc->debug) {          /* test aid: the maxima the legend/bar scaling divides by */
