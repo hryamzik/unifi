@@ -379,8 +379,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_PLAYLIST 32
 
 #define MAX_SUB 3
-typedef struct { int type, size; } wspec_t;
-typedef struct { int type, size; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
+typedef struct { int type, size, wrap; } wspec_t;
+typedef struct { int type, size, wrap; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill;
@@ -399,7 +399,7 @@ typedef struct {
 
 static const char DEFAULT_CONF[] =
 	"fill_dim=30\nfill_edge=1\n"
-	"screen=Status\ndwell=8\nbackfill=0\nwidget=status:16\nwidget=segbar:16\nwidget=dbm:32\nwidget=ssid:24\n"
+	"screen=Status\ndwell=8\nbackfill=0\nwidget=status:16\nwidget=segbar:16\nwidget=dbm:32\nwidget=ssid:24w\n"
 	"widget=clients:24\n"
 	"screen=Traffic\ndwell=8\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
 	"widget=usagebar:12\nwidget=legend:4\n"
@@ -452,6 +452,7 @@ static void conf_line(config_t *c, char *line)
 				if (!strcmp(tok, WTYPES[t].name) && t != W_ROW) {
 					specs[n].type = t;
 					specs[n].size = size > 0 ? size : WTYPES[t].def_size;
+					specs[n].wrap = colon && strchr(colon, 'w') ? 1 : 0;   /* e.g. ssid:24w wraps to 2 lines */
 					n++;
 					break;
 				}
@@ -459,6 +460,7 @@ static void conf_line(config_t *c, char *line)
 		if (n == 1) {
 			s->w[s->nw].type = specs[0].type;
 			s->w[s->nw].size = specs[0].size;
+			s->w[s->nw].wrap = specs[0].wrap;
 			s->nw++;
 		} else if (n > 1) {
 			widget_t *wd = &s->w[s->nw++];
@@ -948,7 +950,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
 		int m = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap };
 			int hh = widget_h(&t, c);
 			if (hh > m) m = hh;
 		}
@@ -956,6 +958,14 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	}
 	switch (wd->type) {
 	case W_STATUS: return wd->size + PAD;
+	case W_SSID: {
+		if (!wd->wrap) return wd->size + PAD;
+		/* wrapping: a second line only when the name at the chosen size is wider than a line */
+		const status_t *st = c->s;
+		const char *nm = strcmp(st->up_state, "up") ? "No uplink" : !strcmp(st->up_type, "wifi") ? (st->up_name[0] ? st->up_name : "Wi-Fi") : !strcmp(st->up_type, "usb") ? "USB WAN" : "Ethernet";
+		const font_t *f = LADDER[ladder_index(wd->size)];
+		return lcd_text_w(f, nm, 1) > 110 ? 2 * f->h + PAD : wd->size + PAD;
+	}
 	case W_DBM: {
 		int wifi = c->s->has_signal && !strcmp(c->s->up_type, "wifi");
 		return !strcmp(c->s->up_state, "up") && (wifi || c->s->speed > 0) ? wd->size + PAD : 0;
@@ -981,6 +991,32 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 
 static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, int y, int h);
 
+/* SSID with wrapping: at the chosen size, break to a second line (after a '-' or ' ' if
+ * there is one in reach, hard break otherwise) instead of shrinking and cutting the name. */
+static void draw_ssid_wrapped(lcd_t *l, span_t sp, int y, int h, int size, const char *s, uint32_t c)
+{
+	const font_t *f = LADDER[ladder_index(size)];
+	int maxw = sp.x1 - sp.x0 + 1, cx = (sp.x0 + sp.x1 + 1) / 2;
+	if (lcd_text_w(f, s, 1) <= maxw) {
+		lcd_draw(l, f, cx - lcd_text_w(f, s, 1) / 2, y + (h - f->h) / 2, s, c, LCD_TRANSPARENT, 1);
+		return;
+	}
+	int maxc = maxw / f->w, len = (int)strlen(s), br = -1;
+	if (maxc < 4) maxc = 4;
+	if (maxc > len) maxc = len;
+	for (int i = maxc; i > maxc / 2; i--)
+		if (s[i - 1] == '-' || s[i - 1] == ' ') { br = i; break; }   /* break after the separator */
+	if (br < 0) br = maxc;
+	char l1[48], l2[48];
+	snprintf(l1, sizeof(l1), "%.*s", br, s);
+	const char *rest = s + br;
+	if (*rest == ' ') rest++;
+	ellipsize(f, rest, maxw, 0, l2, sizeof(l2));
+	int y0 = y + (h - 2 * f->h) / 2;
+	lcd_draw(l, f, cx - lcd_text_w(f, l1, 1) / 2, y0, l1, c, LCD_TRANSPARENT, 1);
+	lcd_draw(l, f, cx - lcd_text_w(f, l2, 1) / 2, y0 + f->h, l2, c, LCD_TRANSPARENT, 1);
+}
+
 static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, int y, int h, span_t sp)
 {
 	const status_t *s = c->s;
@@ -991,12 +1027,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		/* visible members get equal cells of the span, each drawn centred in its cell */
 		int vis[MAX_SUB], nv = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap };
 			if (widget_h(&t, c)) vis[nv++] = i;
 		}
 		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
 		for (int k = 0; k < nv; k++) {
-			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size };
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap };
 			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
 			widget_draw_sp(l, w, &t, c, y, h, cell);
 		}
@@ -1006,6 +1042,7 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 	switch (wd->type) {
 	case W_SSID:
 		if (!up) text_centered(l, w, sp, y, h, wd->size, "No uplink", C_BAD, 0);
+		else if (wifi && wd->wrap && sp.x1 - sp.x0 + 1 >= 90) draw_ssid_wrapped(l, sp, y, h, wd->size, s->up_name[0] ? s->up_name : "Wi-Fi", C_WHITE);
 		else if (wifi) text_centered(l, w, sp, y, h, wd->size, s->up_name[0] ? s->up_name : "Wi-Fi", C_WHITE, 0);
 		else text_centered(l, w, sp, y, h, wd->size, !strcmp(s->up_type, "usb") ? "USB WAN" : "Ethernet", C_WHITE, 0);
 		break;
@@ -1206,7 +1243,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			for (int j = 0; j < sc->w[i].nsub; j++) {
 				int st = sc->w[i].sub[j].type;
 				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
-					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size };
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap };
 					widget_draw(NULL, w, &mt, &c, top, hs[i]);
 				}
 			}
