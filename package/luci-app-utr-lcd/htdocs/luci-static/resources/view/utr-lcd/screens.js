@@ -37,13 +37,13 @@ var TYPES = {
 	rule:        { label: 'Divider line',          group: 'general', sizes: null, def: 2 },
 	speed:       { label: 'Speed down / up',       group: 'traffic', sizes: [16, 24], def: 24 },
 	speed1:      { label: 'Speed down+up (one line)', group: 'traffic', sizes: [16], def: 16 },
-	speedbar:    { label: 'Speed by client (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
-	speeddn:     { label: 'Download by client (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
-	speedup:     { label: 'Upload by client (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
+	speedbar:    { label: 'Client speed, down+up (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
+	speeddn:     { label: 'Client download speed (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
+	speedup:     { label: 'Client upload speed (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
 	usage:       { label: 'Total traffic',         group: 'traffic', sizes: [12, 16], def: 16 },
-	usagebar:    { label: 'Total by client (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
-	usagedn:     { label: 'Downloaded total (bar, total inside)', group: 'traffic', sizes: [16, 24], def: 16 },
-	usageup:     { label: 'Uploaded total (bar, total inside)', group: 'traffic', sizes: [16, 24], def: 16 },
+	usagebar:    { label: 'Client traffic, total (bar)', group: 'traffic', sizes: [8, 12, 16], def: 12 },
+	usagedn:     { label: 'Client downloaded total (bar)', group: 'traffic', sizes: [16, 20, 24], def: 20 },
+	usageup:     { label: 'Client uploaded total (bar)', group: 'traffic', sizes: [16, 20, 24], def: 20 },
 	uplinks:     { label: 'Uplinks (icons, mwan3)', group: 'traffic', sizes: [16, 24], def: 24 },
 	legend:      { label: 'Clients, speed',        group: 'traffic', sizes: [1, 2, 3, 4, 5, 6, 7, 8], def: 4, unit: 'rows' },
 	legendtotal: { label: 'Clients, total',        group: 'traffic', sizes: [1, 2, 3, 4, 5, 6, 7, 8], def: 4, unit: 'rows' },
@@ -70,7 +70,11 @@ var DEFAULT_SCREENS = [
 function widgetHeight(type, size, wrap, w) {
 	size = +size;
 	if (type === 'ssid' && wrap) return 2 * size + 2;   /* wrapped name may take a second line */
-	if (type === 'uplinks') return w && w[8] ? 2 * size + 10 : size + 22;   /* inline rows: worst case 2 uplinks; else icon+label+lines */
+	if (type === 'uplinks') {   /* mirror uplinks_h in lcd-status.c, worst case 2 uplinks */
+		if (w && w[10] && w[11]) return 8;
+		if (w && w[8]) return w[11] ? 2 * (size >= 24 ? 20 : 16) + 10 : 2 * size + 10;
+		return w && w[11] ? 24 : w && w[10] ? size + 10 : size + 22;
+	}
 	switch (type) {
 	case 'rule': return 6;
 	case 'speed': return 2 * (size + 2);
@@ -117,15 +121,16 @@ function parseWidget(str) {
 	var size = parseInt(p[1], 10);
 	if (!size || (t.sizes && t.sizes.indexOf(size) < 0)) size = t.def;
 	var o = p[1] || '', bg = /b([0-5])/.exec(o);
-	/* [type, size, join, wrap, shrink, bg, fit, cores, inline, generic] - flags after the size:
-	 * w wrap, s shrink (ssid), b0..b5 legend background, f/F legend fit, c per-core (cpu), l/g uplinks layout/label */
+	/* [type, size, join, wrap, shrink, bg, fit, cores, inline, generic, noname, noicon] - flags after
+	 * the size: w wrap, s shrink (ssid), b0..b5 legend bg, f/F legend fit, c per-core (cpu), l/g/n/i uplinks */
 	return [p[0], size, false, /w/.test(o), /s/.test(o), bg ? +bg[1] : 0, /F/.test(o) ? 2 : /f/.test(o) ? 1 : 0,
-		/c/.test(o), /l/.test(o), /g/.test(o)];
+		/c/.test(o), /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o)];
 }
 
 function widgetSpec(w) {
 	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '') + (w[7] ? 'c' : '') +
-		(w[5] ? 'b' + w[5] : '') + (w[6] === 2 ? 'F' : w[6] === 1 ? 'f' : '') + (w[8] ? 'l' : '') + (w[9] ? 'g' : '');
+		(w[5] ? 'b' + w[5] : '') + (w[6] === 2 ? 'F' : w[6] === 1 ? 'f' : '') + (w[8] ? 'l' : '') + (w[9] ? 'g' : '') +
+		(w[10] ? 'n' : '') + (w[11] ? 'i' : '');
 }
 
 /* One config item: "type:size" or several joined by '+' for one shared line. */
@@ -330,7 +335,7 @@ return view.extend({
 			var joinFull = !w[2] && groupSize(sc.widgets, wi) >= 3;
 			return E('tr', {}, [
 				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
-					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = false; w[8] = false; w[9] = false; redraw();
+					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = false; w[8] = false; w[9] = false; w[10] = false; w[11] = false; redraw();
 				}, { 'style': 'width:100%; max-width:13em' })),
 				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
 					'checked': w[2] ? '' : null, 'disabled': (wi === sc.widgets.length - 1 || joinFull) ? '' : null,

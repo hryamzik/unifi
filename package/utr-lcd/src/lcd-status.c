@@ -451,8 +451,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_PLAYLIST 32
 
 #define MAX_SUB 3
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic; } wspec_t;   /* bg/fit: legend; cores: cpu; layout/generic: uplinks */
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon; } wspec_t;   /* bg/fit: legend; cores: cpu; layout/generic/noname/noicon: uplinks */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill;
@@ -529,6 +529,8 @@ static void conf_line(config_t *c, char *line)
 					specs[n].cores = colon && strchr(colon, 'c') ? 1 : 0;   /* cpu:16c: bar split per core */
 					specs[n].layout = colon && strchr(colon, 'l') ? 1 : 0;   /* uplinks:24l: icon beside the label, not above */
 					specs[n].generic = colon && strchr(colon, 'g') ? 1 : 0;   /* uplinks:24g: label is WiFi/Eth, not the network name */
+					specs[n].noname = colon && strchr(colon, 'n') ? 1 : 0;   /* uplinks:24n: no labels, icons only */
+					specs[n].noicon = colon && strchr(colon, 'i') ? 1 : 0;   /* uplinks:24i: no icons, labels only */
 					specs[n].fit = colon && strchr(colon, 'F') ? 2 : colon && strchr(colon, 'f') ? 1 : 0;   /* legend fit: f gentle, F compact */
 					if (colon) {   /* legend background: b0..b5 (none speed total signal signal+speed signal+total) */
 						const char *b = strchr(colon, 'b');
@@ -548,6 +550,8 @@ static void conf_line(config_t *c, char *line)
 			s->w[s->nw].cores = specs[0].cores;
 			s->w[s->nw].layout = specs[0].layout;
 			s->w[s->nw].generic = specs[0].generic;
+			s->w[s->nw].noname = specs[0].noname;
+			s->w[s->nw].noicon = specs[0].noicon;
 			s->nw++;
 		} else if (n > 1) {
 			widget_t *wd = &s->w[s->nw++];
@@ -772,7 +776,7 @@ static void draw_tri(lcd_t *l, int x, int y, int down, uint32_t c)
 #define BAR_MAX 6
 
 /* Share bar: one segment per client in its colour (largest BAR_MAX, the rest grey), no text on it. */
-static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int y, int w, int h)
+static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int y, int w, int h, int dir)
 {
 	int idx[MAX_CL], n = traffic_rank_m(t, mode, idx), k = 0;
 	double vals[BAR_MAX + 1], tot = 0, others = 0;
@@ -786,6 +790,14 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 	}
 	if (others > 0) { vals[k] = others; cols[k] = C_OTHER; k++; }
 	lcd_rrect(l, x, y, w, h, 3, C_TRACK);
+	if (dir >= 0 && h >= 8) {          /* direction triangle at the left end, dark like the total bars */
+		int th = h >= 12 ? 7 : 5, tw2 = th + 2;
+		for (int j = 0; j < th; j++) {
+			int bw = dir ? tw2 - j * tw2 / th : 2 + j * tw2 / th;
+			if (bw < 1) bw = 1;
+			lcd_fill(l, x + 3 + (tw2 - bw) / 2, y + (h - th) / 2 + j, bw, 1, RGB(10, 12, 16));
+		}
+	}
 	double acc = 0;
 	for (int i = 0; i < k && tot > 0; i++) {
 		int x0 = x + (int)(acc / tot * w + 0.5);
@@ -797,18 +809,18 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 
 static void draw_share_bar(lcd_t *l, const traffic_t *t, int by_total, int x, int y, int w, int h)
 {
-	draw_share_bar_m(l, t, by_total ? BM_TOTAL : BM_RATE, x, y, w, h);
+	draw_share_bar_m(l, t, by_total ? BM_TOTAL : BM_RATE, x, y, w, h, -1);
 }
 
 /* Directional total bar with the total written inside it (down or up bytes). */
 static void draw_total_bar(lcd_t *l, const traffic_t *t, int down, int x, int y, int w, int h)
 {
-	draw_share_bar_m(l, t, down ? BM_DTOTAL : BM_UTOTAL, x, y, w, h);
+	draw_share_bar_m(l, t, down ? BM_DTOTAL : BM_UTOTAL, x, y, w, h, -1);
 	if (!t->valid) return;
 	char val[24];
 	fmt_bytes(down ? t->dtot : t->utot, val, sizeof(val));
-	const font_t *f = h >= 24 ? &FONT_T16B : &FONT_T12;
-	int tw = 18 + lcd_text_w(f, val, 1), x0 = x + (w - tw) / 2, ty = y + (h - f->h) / 2;
+	const font_t *f = h >= 20 ? &FONT_T16B : &FONT_T12;
+	int x0 = x + 5, ty = y + (h - f->h) / 2;
 	draw_tri(l, x0, ty + (f->h - 10) / 2, down, RGB(10, 12, 16));
 	lcd_draw(l, f, x0 + 18, ty, val, RGB(10, 12, 16), LCD_TRANSPARENT, 1);
 }
@@ -908,8 +920,10 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 				int bw = (sp.x1 + 1 - sp.x0) * (int)(client_val(c, bgmode) * 100 / bgmax) / 100;
 				if (bw > 0) lcd_fill(l, sp.x0, y, bw, pitch - 1, dim_color(PALETTE[c->color], 34));
 			}
-			if ((bg == 3 || bg == 4 || bg == 5) && c->has_signal)   /* signal: bright 1 px line, length = quality */
-				lcd_fill(l, sp.x0, y + pitch - 2, (sp.x1 + 1 - sp.x0) * sig_pct(c->signal) / 100, 1, PALETTE[c->color]);
+			if ((bg == 3 || bg == 4 || bg == 5) && c->has_signal) {   /* signal: 1 px line, length and colour = quality */
+				int sq = sig_pct(c->signal);
+				lcd_fill(l, sp.x0, y + pitch - 2, (sp.x1 + 1 - sp.x0) * sq / 100, 1, sq >= 66 ? C_OK : sq >= 33 ? C_WARN : C_BAD);
+			}
 			int cs = step >= 2 ? 6 : 8;
 			lcd_rrect(l, sp.x0, y + (pitch - cs) / 2, cs, cs, 2, PALETTE[c->color]);
 			lcd_draw(l, nf, sp.x0 + 12, y + (pitch - nf->h) / 2, nm, C_WHITE, LCD_TRANSPARENT, 1);
@@ -1183,9 +1197,13 @@ static void draw_port(lcd_t *l, int cx, int y, int size, uint32_t c)
 	lcd_fill(l, cx - 2, py + h, 4, size >= 24 ? 5 : 3, c);
 }
 
-#define UPL_TAIL 20   /* label line (12) + two 1 px share lines with gaps */
+static int upl_pitch(int size) { return size >= 24 ? 20 : 16; }   /* label-only row pitch */
 
-static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s, const traffic_t *t, int layout, int generic)
+/* Uplink icons with state colours, optional labels (layout: one row per uplink, icon beside
+ * the label; otherwise icons side by side above their labels), then two 1 px lines with the
+ * observed download/upload split. Flags: l rows, g short WiFi/Eth labels, n no labels,
+ * i no icons. The Wi-Fi fan is drawn at 3/5 size: at full size it dwarfs the port glyph. */
+static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s, const traffic_t *t, int layout, int generic, int noname, int noicon)
 {
 	uview_t v[3];
 	int n = build_uplinks(s, t, v);
@@ -1193,45 +1211,48 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 		lcd_draw(l, &FONT_T12, (sp.x0 + sp.x1 + 1) / 2 - lcd_text_w(&FONT_T12, "no uplink", 1) / 2, y + 2, "no uplink", C_BAD, LCD_TRANSPARENT, 1);
 		return;
 	}
-	int split = 0;
+	int split = 0, fs = size * 3 / 5;
 	for (int i = 0; i < n; i++) if (v[i].pct > 0 && v[i].pct < 100) split = 1;
-	if (layout) {          /* one line per uplink: icon beside its label, lines stacked */
-		const font_t *lf = size >= 24 ? &FONT_T16B : &FONT_T12;
-		for (int i = 0; i < n; i++) {
-			uint32_t col = upl_color(v[i].state);
-			int ry = y + i * size, cx = sp.x0 + size / 2;
-			char lab[40], out[40];
-			copy(lab, sizeof(lab), generic ? (v[i].wifi ? "WiFi" : "Eth") : v[i].label);
-			if (split && v[i].pct >= 0) snprintf(lab + strlen(lab), sizeof(lab) - strlen(lab), " %d%%", v[i].pct);
-			if (v[i].wifi) draw_fan(l, cx, ry + size, size, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
-			else draw_port(l, cx, ry, size, col);
-			if (v[i].state == UV_OFF)
-				for (int k = -size / 2; k <= size / 2; k++) lcd_fill(l, cx + k, ry + size / 2 - k, 2, 2, col);
-			int lx = sp.x0 + size + (v[i].wifi ? 16 : 6);   /* the fan's arcs reach past its centre column */
-			const font_t *lf2 = ((int)strlen(lab) * lf->w > sp.x1 - lx && lf != &FONT_T12) ? &FONT_T12 : lf;   /* shrink before truncating */
-			ellipsize(lf2, lab, sp.x1 - lx, 0, out, sizeof(out));
-			lcd_draw(l, lf2, lx, ry + (size - lf2->h) / 2, out, col, LCD_TRANSPARENT, 1);
-		}
-	} else {               /* icon above its label, uplinks side by side */
-		int cw = (sp.x1 - sp.x0 + 1) / n;
-		for (int i = 0; i < n; i++) {
-			int cx = sp.x0 + cw * i + cw / 2;
-			uint32_t col = upl_color(v[i].state);
-			char lab[40], out[40];
-			copy(lab, sizeof(lab), generic ? (v[i].wifi ? "WiFi" : "Eth") : v[i].label);
-			if (split && v[i].pct >= 0) snprintf(lab + strlen(lab), sizeof(lab) - strlen(lab), " %d%%", v[i].pct);
-			if (v[i].wifi) draw_fan(l, cx, y + size, size, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
-			else draw_port(l, cx, y, size, col);
-			if (v[i].state == UV_OFF)
-				for (int k = -size / 2; k <= size / 2; k++) lcd_fill(l, cx + k, y + size / 2 - k, 2, 2, col);
-			ellipsize(&FONT_T12, lab, cw - 2, 0, out, sizeof(out));
-			lcd_draw(l, &FONT_T12, cx - lcd_text_w(&FONT_T12, out, 1) / 2, y + size + 2, out, col, LCD_TRANSPARENT, 1);
+	int rowh = layout ? (noicon ? upl_pitch(size) : size) : (noicon ? 14 : size + (noname ? 0 : 14));
+	for (int i = 0; i < n; i++) {
+		uint32_t col = upl_color(v[i].state);
+		char lab[40], out[40];
+		copy(lab, sizeof(lab), generic ? (v[i].wifi ? "WiFi" : "Eth") : v[i].label);
+		if (split && v[i].pct >= 0) snprintf(lab + strlen(lab), sizeof(lab) - strlen(lab), " %d%%", v[i].pct);
+		if (layout) {
+			int ry = y + i * rowh, cx = sp.x0 + size / 2;
+			if (!noicon) {
+				if (v[i].wifi) draw_fan(l, cx, ry + size, fs, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
+				else draw_port(l, cx, ry, size, col);
+				if (v[i].state == UV_OFF)
+					for (int k = -size / 3; k <= size / 3; k++) lcd_fill(l, cx + k, ry + size / 2 - k, 2, 2, col);
+			}
+			if (!noname) {
+				const font_t *lf = size >= 24 ? &FONT_T16B : &FONT_T12;
+				int lx = noicon ? sp.x0 : sp.x0 + size + 6;
+				const font_t *lf2 = ((int)strlen(lab) * lf->w > sp.x1 - lx && lf != &FONT_T12) ? &FONT_T12 : lf;   /* shrink before truncating */
+				ellipsize(lf2, lab, sp.x1 - lx, 0, out, sizeof(out));
+				lcd_draw(l, lf2, lx, ry + (rowh - lf2->h) / 2, out, col, LCD_TRANSPARENT, 1);
+			}
+		} else {
+			int cw = (sp.x1 - sp.x0 + 1) / n, cx = sp.x0 + cw * i + cw / 2;
+			if (!noicon) {
+				if (v[i].wifi) draw_fan(l, cx, y + size, fs, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
+				else draw_port(l, cx, y, size, col);
+				if (v[i].state == UV_OFF)
+					for (int k = -size / 3; k <= size / 3; k++) lcd_fill(l, cx + k, y + size / 2 - k, 2, 2, col);
+			}
+			if (!noname) {
+				ellipsize(&FONT_T12, lab, cw - 2, 0, out, sizeof(out));
+				lcd_draw(l, &FONT_T12, cx - lcd_text_w(&FONT_T12, out, 1) / 2, y + (noicon ? 1 : size + 2), out, col, LCD_TRANSPARENT, 1);
+			}
 		}
 	}
 	/* observed split: down line over up line, 1 px each, segments in the uplink colours */
 	double dt = 0, ut = 0;
 	for (int i = 0; i < n; i++) { dt += v[i].down; ut += v[i].up; }
-	int wdt = sp.x1 - sp.x0 + 1, ly = y + (layout ? n * size + 3 : size + 2 + 12 + 2);
+	int wdt = sp.x1 - sp.x0 + 1, ly = y + (layout ? n : 1) * rowh + 3;
+	if (noname && noicon) ly = y + 1;
 	for (int line = 0; line < 2; line++) {
 		double tot = line ? ut : dt, acc = 0;
 		lcd_fill(l, sp.x0, ly + line * 3, wdt, 1, C_TRACK);
@@ -1245,12 +1266,14 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 	}
 }
 
-static int uplinks_h(const status_t *s, const traffic_t *t, int size, int layout)
+static int uplinks_h(const status_t *s, const traffic_t *t, int size, int layout, int noname, int noicon)
 {
 	uview_t v[3];
 	int n = build_uplinks(s, t, v);
 	if (!n) return FONT_T12.h + 2;
-	return layout ? n * size + 8 + 2 : size + UPL_TAIL + 2;
+	if (noname && noicon) return 8;
+	int rowh = layout ? (noicon ? upl_pitch(size) : size) : (noicon ? 14 : size + (noname ? 0 : 14));
+	return (layout ? n : 1) * rowh + 8 + 2;   /* rows + the two 1 px split lines */
 }
 
 /* ---------------------------------------------------------------------------------------- widgets */
@@ -1306,7 +1329,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
 		int m = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon };
 			int hh = widget_h(&t, c);
 			if (hh > m) m = hh;
 		}
@@ -1343,7 +1366,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	case W_DONUT: return wd->size + PAD;
 	case W_TEMP: return c->res->temp >= 0 ? wd->size + PAD : 0;
 	case W_MULTIWAN: return multiwan_h(c->s, wd->size);
-	case W_UPLINKS: return uplinks_h(c->s, c->tr, wd->size, wd->layout);     /* never hidden: shows "no uplink" when empty */
+	case W_UPLINKS: return uplinks_h(c->s, c->tr, wd->size, wd->layout, wd->noname, wd->noicon);     /* never hidden: shows "no uplink" when empty */
 	default: return wd->size + PAD;
 	}
 }
@@ -1382,12 +1405,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		/* visible members get equal cells of the span, each drawn centred in its cell */
 		int vis[MAX_SUB], nv = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon };
 			if (widget_h(&t, c)) vis[nv++] = i;
 		}
 		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
 		for (int k = 0; k < nv; k++) {
-			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic };
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon };
 			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
 			widget_draw_sp(l, w, &t, c, y, h, cell);
 		}
@@ -1506,8 +1529,8 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		break;
 	case W_SPEED1: draw_speed1(l, sp, y, h, c->tr); break;
 	case W_SPEEDBAR: draw_share_bar(l, c->tr, 0, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
-	case W_SPEEDDN: draw_share_bar_m(l, c->tr, BM_DRATE, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
-	case W_SPEEDUP: draw_share_bar_m(l, c->tr, BM_URATE, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_SPEEDDN: draw_share_bar_m(l, c->tr, BM_DRATE, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size, 1); break;
+	case W_SPEEDUP: draw_share_bar_m(l, c->tr, BM_URATE, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size, 0); break;
 	case W_USAGEBAR: draw_share_bar(l, c->tr, 1, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
 	case W_USAGEDN: draw_total_bar(l, c->tr, 1, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
 	case W_USAGEUP: draw_total_bar(l, c->tr, 0, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
@@ -1520,7 +1543,7 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 	case W_LEGENDTOTAL: draw_legend(l, w, c->tr, 1, wd->size, y, h, c->name_len, wd->bg, wd->fit); break;
 	case W_DONUT: draw_donut(l, c->tr, (sp.x0 + sp.x1 + 1) / 2, y + h / 2, (wd->size - 2) / 2); break;
 	case W_MULTIWAN: draw_multiwan(l, w, s, c->tr, wd->size, y); break;
-	case W_UPLINKS: draw_uplinks(l, sp, y, wd->size, s, c->tr, wd->layout, wd->generic); break;
+	case W_UPLINKS: draw_uplinks(l, sp, y, wd->size, s, c->tr, wd->layout, wd->generic, wd->noname, wd->noicon); break;
 	case W_CPU:
 		if (wd->cores && c->res->ncores > 0) draw_core_bar(l, sp, y, h, c->row_step ? 12 : wd->size, c->res);
 		else draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "CPU", c->res->cpu, C_TRACK);
@@ -1623,7 +1646,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			for (int j = 0; j < sc->w[i].nsub; j++) {
 				int st = sc->w[i].sub[j].type;
 				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
-					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic };
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon };
 					widget_draw(NULL, w, &mt, &c, top, hs[i]);
 				}
 			}
