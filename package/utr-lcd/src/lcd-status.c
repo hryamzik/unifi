@@ -399,8 +399,8 @@ typedef struct {
 
 static const char DEFAULT_CONF[] =
 	"fill_dim=30\nfill_edge=1\n"
-	"screen=Status\ndwell=8\nbackfill=0\nwidget=segbar:16\nwidget=ssid:24\nwidget=dbm:32\nwidget=rule:2\n"
-	"widget=status:16+clients:24\n"
+	"screen=Status\ndwell=8\nbackfill=0\nwidget=status:16\nwidget=segbar:16\nwidget=dbm:32\nwidget=ssid:24\n"
+	"widget=clients:24\n"
 	"screen=Traffic\ndwell=8\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
 	"widget=usagebar:12\nwidget=legend:4\n"
 	"screen=Details\ndwell=5\nbackfill=1\n"
@@ -1139,7 +1139,7 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		 * With a full line it also carries the words; in a shared line the icon alone changes. */
 		int ready = !strcmp(c->state, "ready"), noint = !strcmp(c->state, "noInternet");
 		uint32_t col = ready ? C_OK : noint ? C_WARN : C_BAD;
-		const char *text = ready ? "Online" : noint ? "No internet" : "No uplink";
+		const char *text = ready ? "ONLINE" : noint ? "NO INTERNET" : "NO UPLINK";
 		int r = wd->size / 2, cy = y + h / 2, cx = (sp.x0 + sp.x1 + 1) / 2;
 		if (sp.x1 - sp.x0 + 1 >= 90) {
 			int tw = lcd_text_w(&FONT_T16B, text, 1), x0 = cx - (wd->size + 6 + tw) / 2;
