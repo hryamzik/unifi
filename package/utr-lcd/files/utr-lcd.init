@@ -21,10 +21,27 @@ set_brightness() {
 }
 
 # Flatten the screen layout from UCI into a key=value file for the built-in renderer.
-screen_widget() { echo "widget=$1"; }
+# Widgets that need the traffic sampler (traffic.sh); it only runs while a screen that is shown uses one.
+TRAFFIC_WANTED=0
+SCREEN_NO=0
+SCREEN_SHOWN=0
+screen_widget() {
+	echo "widget=$1"
+	case "$1" in speed*|usage*|legend*|donut*) [ "$SCREEN_SHOWN" = 1 ] && TRAFFIC_WANTED=1 ;; esac
+}
 
 screen_section() {
 	local name dwell enabled indicator backfill
+	SCREEN_NO=$((SCREEN_NO + 1))
+	SCREEN_SHOWN=0
+	config_get_bool enabled "$1" enabled 1
+	if [ "$WL_MODE" = pin ]; then
+		[ "$SCREEN_NO" = "$WL_PIN" ] && SCREEN_SHOWN=1
+	elif [ -n "$WL_PLAYLIST" ]; then
+		case " $WL_PLAYLIST " in *" $SCREEN_NO "*) [ "$enabled" = 1 ] && SCREEN_SHOWN=1 ;; esac
+	else
+		[ "$enabled" = 1 ] && SCREEN_SHOWN=1
+	fi
 	config_get name      "$1" name "Screen"
 	config_get dwell     "$1" dwell 8
 	config_get_bool enabled "$1" enabled 1
@@ -39,20 +56,26 @@ screen_section() {
 }
 
 write_screens() {
-	local smode spin playlist fdim fedge
+	local smode spin playlist fdim fedge nlen
 	config_get smode    main screen_mode rotate
 	config_get spin     main screen_pin 1
 	config_get playlist main playlist ''
 	config_get fdim     main fill_dim 30
 	config_get fedge    main fill_edge 1
+	config_get nlen     main name_len 8
+	WL_MODE=$smode; WL_PIN=$spin; WL_PLAYLIST=$(echo "$playlist" | tr ',' ' ')
+	TRAFFIC_WANTED=0; SCREEN_NO=0
 	{
 		echo "mode=$smode"
 		echo "pin=$spin"
 		echo "playlist=$playlist"
 		echo "fill_dim=$fdim"
 		echo "fill_edge=$fedge"
+		echo "name_len=$nlen"
 		config_foreach screen_section screen
 	} > "$RUN/screens.conf.new" && mv "$RUN/screens.conf.new" "$RUN/screens.conf"
+	# no screen sections: the renderer's built-in screens apply, and they include traffic
+	[ "$SCREEN_NO" = 0 ] && TRAFFIC_WANTED=1
 }
 
 start_service() {
@@ -122,8 +145,16 @@ start_service() {
 
 	else
 		write_screens
+		if [ "$TRAFFIC_WANTED" = 1 ]; then
+			rm -f "$RUN/traffic"
+			procd_open_instance traffic
+			procd_set_param command $LIBEXEC/traffic.sh
+			procd_set_param env UTR_RUN=$RUN
+			procd_set_param respawn 3600 5 0
+			procd_close_instance
+		fi
 		procd_open_instance native
-		procd_set_param command /usr/bin/utr-lcd-status -c $LIBEXEC/collect.sh -C $RUN/screens.conf -i "$interval" $rot_flag
+		procd_set_param command /usr/bin/utr-lcd-status -c $LIBEXEC/collect.sh -C $RUN/screens.conf -T $RUN/traffic -i "$interval" $rot_flag
 		procd_set_param stdout 1
 		procd_set_param stderr 1
 		procd_set_param respawn 3600 5 0

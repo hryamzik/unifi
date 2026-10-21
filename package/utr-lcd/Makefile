@@ -50,6 +50,7 @@ define Package/utr-lcd/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/utr-lcd-fbshim.so $(1)/usr/lib/utr-lcd/
 	$(INSTALL_BIN) ./files/collect.sh $(1)/usr/libexec/utr-lcd/collect.sh
 	$(INSTALL_BIN) ./files/feed.sh $(1)/usr/libexec/utr-lcd/feed.sh
+	$(INSTALL_BIN) ./files/traffic.sh $(1)/usr/libexec/utr-lcd/traffic.sh
 	$(INSTALL_BIN) ./files/power.sh $(1)/usr/libexec/utr-lcd/power.sh
 	$(INSTALL_BIN) ./files/ui-call.sh $(1)/usr/libexec/utr-lcd/ui-call.sh
 	$(INSTALL_BIN) ./files/stock-run.sh $(1)/usr/libexec/utr-lcd/stock-run.sh

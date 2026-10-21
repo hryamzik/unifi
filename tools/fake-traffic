@@ -1,0 +1,12 @@
+t=12345.00
+down_bps=12500000
+up_bps=1800000
+down_total=3200000000
+up_total=500000000
+client=de:f6:15:22:44:8d|iPhone|5200000|1800000000|1
+client=7c:0a:3f:ef:9f:60|Romans-Air|4900000|1100000000|1
+client=LAN|LAN|1600000|300000000|1
+client=aa:bb:cc:00:11:22|Pixel 8|500000|50000000|1
+client=aa:bb:cc:00:11:33|Smart TV|200000|400000000|1
+client=aa:bb:cc:00:11:44|Kindle|50000|20000000|1
+client=aa:bb:cc:00:11:55|Printer with very long name|20000|10000000|1

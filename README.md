@@ -74,6 +74,7 @@ from flash except the bundle itself (~7 MB in `/usr/share/utr-lcd/stock`).
 | `sensor_rate` | `25` | accelerometer sampling rate in Hz while dimming is active (the driver default of 1 Hz makes every read block for seconds); `0` leaves it alone |
 | `screen_mode` | `rotate` | native mode: `rotate` through the screens, or `pin` one (`screen_pin`, 1 = first screen) |
 | `playlist` | empty | native mode: order of rotation by screen number, e.g. `1 2 1 3` shows screen 1 twice per round; empty = every enabled screen in order |
+| `name_len` | `8` | native mode: client names on traffic screens are cut to this many characters (3-16) |
 | `fill_dim`, `fill_edge` | `30`, `1` | native mode: Wi-Fi signal backfill brightness in percent of the full colour, and a bright line at its edge |
 | `screen_timeout` | `0` | both modes: turn the backlight off after this many seconds without motion; `0` never turns it off. Moving the router restores full brightness |
 
@@ -81,7 +82,7 @@ from flash except the bundle itself (~7 MB in `/usr/share/utr-lcd/stock`).
 
 The built-in renderer shows one or more screens, each a stack of widgets over an optional signal backfill.
 `config screen` sections define them in order (screen 1 is the first section); the defaults are *Status*
-(SSID, signal, client count, 8 s) and *Details* (WAN IP, LAN IP, VPN, uptime, 5 s).
+(SSID, signal, client count, 8 s), *Traffic* (speeds, per-client share bars, legend, 8 s) and *Details* (WAN IP, LAN IP, VPN, uptime, 5 s).
 
 | Option | Default | Meaning |
 | --- | --- | --- |
@@ -90,7 +91,9 @@ The built-in renderer shows one or more screens, each a stack of widgets over an
 | `enabled` | `1` | `0` keeps the screen configured but out of the rotation |
 | `indicator` | `dot` | online status: a coloured `dot` that grows into a text banner (NO UPLINK, NO INTERNET) when something is wrong, a full `pill`, or `none` |
 | `backfill` | `1` | colour the screen from the bottom by the Wi-Fi signal (red poor, green full); only for a Wi-Fi uplink |
-| `list widget` | | widgets top to bottom as `type:size`: `ssid dbm clients` (sizes 16, 24, 32), `wanip lanip vpn uptime` (12, 16), `rule`. A widget with nothing to show (no VPN configured, no signal) takes no room; spare room is spread between the widgets. Text steps down to a smaller size before it is cut, addresses are shortened in the middle |
+| `list widget` | | widgets top to bottom as `type:size`: `ssid dbm clients` (sizes 16, 24, 32), `wanip lanip vpn uptime` (12, 16), `rule`; traffic widgets: `speed` (16, 24: down and up, two lines), `speedbar` / `usagebar` (bar height 8, 12, 16: current speed / total traffic split by client), `usage` (12, 16), `legend` / `legendtotal` (the number is the count of client rows: colour chip, name, current speed / total; the last row becomes `+k more`), `donut` (diameter in pixels, current speed split by client, total speed in the middle). A widget with nothing to show (no VPN configured, no signal) takes no room; spare room is spread between the widgets. Text steps down to a smaller size before it is cut, addresses are shortened in the middle |
+
+Traffic is sampled by `traffic.sh` every 2 s, only while a screen that is shown has traffic widgets, and kept in RAM (`/var/run/utr-lcd/traffic`; nothing is written to flash). Wi-Fi clients come from `iw station dump` (names from the DHCP leases), all wired ports together count as one client `LAN`, totals are since the sampler started. Each client keeps its colour (hash of the MAC); the biggest six get a bar segment, the rest share a grey one.
 
 While the backlight is off the rotation pauses. Edit with `uci` and `uci commit utr-lcd; reload_config`; a LuCI editor with a live preview is planned.
 

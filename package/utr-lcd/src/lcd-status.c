@@ -14,9 +14,10 @@
  * few px at the sides and rounds the corners with ~31 px radius) and for off-axis viewing: black
  * background, large bold text, every state spelled out in words (never colour alone).
  *
- * Usage: utr-lcd-status [-c collector] [-C screens.conf] [-i seconds] [-0] [-1 [-N screen]] [-l]
+ * Usage: utr-lcd-status [-c collector] [-C screens.conf] [-T traffic] [-i seconds] [-0] [-1 [-N screen]] [-l]
  *   -c  collector command   (default /usr/libexec/utr-lcd/collect.sh)
  *   -C  screen layout file  (default /var/run/utr-lcd/screens.conf)
+ *   -T  traffic file        (default /var/run/utr-lcd/traffic, written by traffic.sh)
  *   -i  refresh interval    (default 5)
  *   -0  do not rotate 180 degrees (default rotates; the panel is mounted upside-down)
  *   -1  draw once, hold, exit (for testing; hold time is LCD_ONCE_HOLD seconds)
@@ -24,8 +25,10 @@
  *   -l  list the configured screens (number, enabled, dwell, name) and exit
  * Env: LCD_TRACE=1 prints a line (ms, screen number) to stderr whenever a screen is drawn.
  */
+#include <math.h>
 #include <poll.h>
 #include <signal.h>
+#include <sys/stat.h>
 #include <time.h>
 #include "lcd.h"
 
@@ -140,9 +143,132 @@ static int coll_poll(collector_t *c, status_t *out)
 	return 0;
 }
 
+/* ------------------------------------------------------------------------------------- traffic */
+
+#define MAX_CL 24
+#define TRAFFIC_COLORS 12
+typedef struct { char id[24], name[32]; double rate, total; int online, color; } cl_t;
+typedef struct { int valid; double down, up, dtot, utot; cl_t c[MAX_CL]; int n; } traffic_t;
+
+static const uint32_t PALETTE[TRAFFIC_COLORS] = {
+	RGB(0, 200, 255), RGB(255, 150, 30), RGB(230, 70, 200), RGB(150, 230, 40), RGB(150, 110, 255), RGB(255, 220, 50),
+	RGB(40, 210, 170), RGB(255, 100, 100), RGB(60, 120, 255), RGB(255, 150, 200), RGB(120, 255, 190), RGB(200, 160, 80) };
+#define C_OTHER RGB(120, 130, 150)
+#define C_TRACK RGB(40, 46, 64)
+#define C_DOWN  RGB(0, 200, 255)
+#define C_UP    RGB(255, 150, 30)
+
+/* Stable colour per client: from a hash of its id, probing on collisions (assigned in hash order). */
+static void traffic_colors(traffic_t *t)
+{
+	unsigned h[MAX_CL];
+	int order[MAX_CL], used[TRAFFIC_COLORS] = { 0 };
+	for (int i = 0; i < t->n; i++) {
+		unsigned x = 2166136261u;
+		for (const char *p = t->c[i].id; *p; p++) x = (x ^ (unsigned char)*p) * 16777619u;
+		h[i] = x;
+		order[i] = i;
+	}
+	for (int i = 1; i < t->n; i++) {                     /* insertion sort by hash */
+		int v = order[i], j = i - 1;
+		while (j >= 0 && h[order[j]] > h[v]) { order[j + 1] = order[j]; j--; }
+		order[j + 1] = v;
+	}
+	for (int k = 0; k < t->n; k++) {
+		int i = order[k], idx = (int)(h[i] % TRAFFIC_COLORS);
+		for (int tries = 0; tries < TRAFFIC_COLORS && used[idx]; tries++) idx = (idx + 1) % TRAFFIC_COLORS;
+		used[idx] = 1;
+		t->c[i].color = idx;
+	}
+}
+
+/* Read the sampler's file (see traffic.sh); unusable when missing or older than 15 s. */
+static void traffic_load(traffic_t *t, const char *path)
+{
+	memset(t, 0, sizeof(*t));
+	struct stat sb;
+	if (stat(path, &sb) || (!getenv("LCD_TRAFFIC_ANY_AGE") && time(NULL) - sb.st_mtime > 15)) return;
+	FILE *f = fopen(path, "r");
+	if (!f) return;
+	char line[160];
+	while (fgets(line, sizeof(line), f)) {
+		line[strcspn(line, "\r\n")] = 0;
+		char *eq = strchr(line, '=');
+		if (!eq) continue;
+		*eq++ = 0;
+		if (!strcmp(line, "down_bps")) { t->down = atof(eq); t->valid = 1; }
+		else if (!strcmp(line, "up_bps")) t->up = atof(eq);
+		else if (!strcmp(line, "down_total")) t->dtot = atof(eq);
+		else if (!strcmp(line, "up_total")) t->utot = atof(eq);
+		else if (!strcmp(line, "client") && t->n < MAX_CL) {
+			cl_t *c = &t->c[t->n];
+			char *f1 = strtok(eq, "|"), *f2 = strtok(NULL, "|"), *f3 = strtok(NULL, "|"), *f4 = strtok(NULL, "|"), *f5 = strtok(NULL, "|");
+			if (!f1 || !f2 || !f3 || !f4 || !f5) continue;
+			copy(c->id, sizeof(c->id), f1);
+			copy(c->name, sizeof(c->name), f2);
+			c->rate = atof(f3); c->total = atof(f4); c->online = atoi(f5);
+			t->n++;
+		}
+	}
+	fclose(f);
+	traffic_colors(t);
+}
+
+/* Indices of the clients by metric, largest first; only those with something to show. */
+static int traffic_rank(const traffic_t *t, int by_total, int *idx)
+{
+	int n = 0;
+	for (int i = 0; i < t->n; i++) {
+		double v = by_total ? t->c[i].total : t->c[i].rate;
+		if (v <= 0 && !(by_total ? 0 : t->c[i].online)) continue;
+		int j = n++;
+		while (j > 0) {
+			const cl_t *a = &t->c[idx[j - 1]], *b = &t->c[i];
+			double av = by_total ? a->total : a->rate, bv = by_total ? b->total : b->rate;
+			if (av > bv || (av == bv && a->total >= b->total)) break;
+			idx[j] = idx[j - 1];
+			j--;
+		}
+		idx[j] = i;
+	}
+	return n;
+}
+
+/* Speed as a number and a unit, e.g. 12.5 + "Mb/s". */
+static void fmt_rate(double bps, char *num, size_t n, const char **unit)
+{
+	double v = bps;
+	*unit = "b/s";
+	if (bps >= 1e9) { v = bps / 1e9; *unit = "Gb/s"; }
+	else if (bps >= 1e6) { v = bps / 1e6; *unit = "Mb/s"; }
+	else if (bps >= 1e3) { v = bps / 1e3; *unit = "kb/s"; }
+	if (v < 10 && *unit[0] != 'b') snprintf(num, n, "%.1f", v);
+	else snprintf(num, n, "%.0f", v);
+}
+
+/* At most 4 characters: 340, 1.2k, 12M, 3.4G. */
+static void fmt_short(double v, char *out, size_t n)
+{
+	static const char U[] = " kMGT";
+	int u = 0;
+	while (v >= 999.5 && u < 4) { v /= 1000; u++; }
+	if (u && v < 9.95) snprintf(out, n, "%.1f%c", v, U[u]);
+	else snprintf(out, n, "%.0f%c", v, u ? U[u] : '\0');
+}
+
+static void fmt_bytes(double v, char *out, size_t n)
+{
+	static const char *U[] = { "B", "kB", "MB", "GB", "TB" };
+	int u = 0;
+	while (v >= 999.5 && u < 4) { v /= 1000; u++; }
+	if (u && v < 99.95) snprintf(out, n, "%.1f %s", v, U[u]);
+	else snprintf(out, n, "%.0f %s", v, U[u]);
+}
+
 /* ---------------------------------------------------------------------------------- configuration */
 
-enum { W_SSID, W_DBM, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE, W_NTYPES };
+enum { W_SSID, W_DBM, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
+       W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT, W_NTYPES };
 enum { ST_DOT, ST_PILL, ST_NONE };
 
 typedef struct { const char *name; int def_size; } wtype_t;
@@ -155,6 +281,13 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_VPN]     = { "vpn", 16 },
 	[W_UPTIME]  = { "uptime", 16 },
 	[W_RULE]    = { "rule", 2 },
+	[W_SPEED]   = { "speed", 24 },          /* down and up speed, two lines; size 16 or 24 */
+	[W_SPEEDBAR] = { "speedbar", 12 },      /* current speed split by client, size = bar height 8/12/16 */
+	[W_USAGE]   = { "usage", 16 },          /* total traffic since the sampler started */
+	[W_USAGEBAR] = { "usagebar", 12 },      /* total traffic split by client */
+	[W_LEGEND]  = { "legend", 4 },          /* size = number of client rows; colour, name, current speed */
+	[W_LEGENDTOTAL] = { "legendtotal", 4 }, /* same, with each client's total */
+	[W_DONUT]   = { "donut", 80 },          /* current speed split by client, size = diameter */
 };
 
 #define MAX_WIDGETS 16
@@ -174,11 +307,14 @@ typedef struct {
 	int pinned, pin;                   /* mode=pin: show only screen `pin` (1-based) */
 	int playlist[MAX_PLAYLIST], npl;   /* 1-based screen numbers; empty = every enabled screen in order */
 	int fill_dim, fill_edge;           /* signal backfill: brightness percent, bright edge line */
+	int name_len;                      /* client names are cut to this many characters */
 } config_t;
 
 static const char DEFAULT_CONF[] =
 	"fill_dim=30\nfill_edge=1\n"
 	"screen=Status\ndwell=8\nindicator=dot\nbackfill=1\nwidget=ssid:24\nwidget=dbm:32\nwidget=clients:24\n"
+	"screen=Traffic\ndwell=8\nindicator=dot\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
+	"widget=usagebar:12\nwidget=legend:4\n"
 	"screen=Details\ndwell=5\nindicator=dot\nbackfill=1\n"
 	"widget=wanip:16\nwidget=lanip:16\nwidget=vpn:16\nwidget=uptime:16\n";
 
@@ -199,6 +335,7 @@ static void conf_line(config_t *c, char *line)
 		else if (!strcmp(line, "pin")) c->pin = atoi(eq);
 		else if (!strcmp(line, "fill_dim")) c->fill_dim = atoi(eq);
 		else if (!strcmp(line, "fill_edge")) c->fill_edge = atoi(eq);
+		else if (!strcmp(line, "name_len")) c->name_len = atoi(eq);
 		else if (!strcmp(line, "playlist")) {
 			for (char *t = strtok(eq, " ,"); t && c->npl < MAX_PLAYLIST; t = strtok(NULL, " ,"))
 				if (atoi(t) > 0) c->playlist[c->npl++] = atoi(t);
@@ -241,7 +378,7 @@ static void conf_parse(config_t *c, const char *text)
 static void conf_load(config_t *c, const char *path)
 {
 	memset(c, 0, sizeof(*c));
-	c->fill_dim = 30; c->fill_edge = 1;
+	c->fill_dim = 30; c->fill_edge = 1; c->name_len = 8;
 	char text[4096];
 	FILE *f = path ? fopen(path, "r") : NULL;
 	size_t n = f ? fread(text, 1, sizeof(text) - 1, f) : 0;
@@ -249,13 +386,15 @@ static void conf_load(config_t *c, const char *path)
 	text[n] = 0;
 	if (n) conf_parse(c, text);
 	if (!c->ns) {                    /* missing or empty: built-in screens */
-		int fd = c->fill_dim, fe = c->fill_edge;
+		int fd = c->fill_dim, fe = c->fill_edge, nl = c->name_len;
 		memset(c, 0, sizeof(*c));
-		c->fill_dim = fd; c->fill_edge = fe;
+		c->fill_dim = fd; c->fill_edge = fe; c->name_len = nl;
 		conf_parse(c, DEFAULT_CONF);
 	}
 	if (c->fill_dim < 5) c->fill_dim = 5;
 	if (c->fill_dim > 100) c->fill_dim = 100;
+	if (c->name_len < 3) c->name_len = 3;
+	if (c->name_len > 16) c->name_len = 16;
 }
 
 /* Screens to show, in order: the pinned one, or the playlist, or every enabled screen. */
@@ -412,9 +551,147 @@ static void draw_pill(lcd_t *l, const win_t *w, int y, const char *text, uint32_
 	lcd_draw(l, &FONT_T16B, x + 20, y + 3, text, C_WHITE, LCD_TRANSPARENT, 1);
 }
 
+/* Down (1) or up (0) arrow, 12x10. */
+static void draw_tri(lcd_t *l, int x, int y, int down, uint32_t c)
+{
+	for (int j = 0; j < 10; j++) {
+		int w = down ? 12 - j * 12 / 10 : 2 + j * 12 / 10;
+		if (w < 1) w = 1;
+		lcd_fill(l, x + (12 - w) / 2, y + j, w, 1, c);
+	}
+}
+
+#define BAR_MAX 6
+
+/* Share bar: one segment per client in its colour (largest BAR_MAX, the rest grey), no text on it. */
+static void draw_share_bar(lcd_t *l, const traffic_t *t, int by_total, int x, int y, int w, int h)
+{
+	int idx[MAX_CL], n = traffic_rank(t, by_total, idx), k = 0;
+	double vals[BAR_MAX + 1], tot = 0, others = 0;
+	uint32_t cols[BAR_MAX + 1];
+	for (int i = 0; i < n; i++) {
+		double v = by_total ? t->c[idx[i]].total : t->c[idx[i]].rate;
+		if (v <= 0) continue;
+		if (k < BAR_MAX) { vals[k] = v; cols[k] = PALETTE[t->c[idx[i]].color]; k++; }
+		else others += v;
+		tot += v;
+	}
+	if (others > 0) { vals[k] = others; cols[k] = C_OTHER; k++; }
+	lcd_rrect(l, x, y, w, h, 3, C_TRACK);
+	double acc = 0;
+	for (int i = 0; i < k && tot > 0; i++) {
+		int x0 = x + (int)(acc / tot * w + 0.5);
+		acc += vals[i];
+		int x1 = x + (int)(acc / tot * w + 0.5);
+		if (x1 - x0 > 1) lcd_fill(l, x0 + (i ? 1 : 0), y + 1, x1 - x0 - (i ? 1 : 0), h - 2, cols[i]);
+	}
+}
+
+/* Ring split by client; the centre holds the total speed in the largest font that fits inside. */
+static void draw_donut(lcd_t *l, const traffic_t *t, int cx, int cy, int ro)
+{
+	int ri = ro * 62 / 100, idx[MAX_CL], n = traffic_rank(t, 0, idx), shown = n > BAR_MAX ? BAR_MAX : n;
+	double tot = 0, vals[BAR_MAX + 1] = { 0 };
+	uint32_t cols[BAR_MAX + 1];
+	for (int i = 0; i < n; i++) {
+		double v = t->c[idx[i]].rate;
+		if (v <= 0) continue;
+		int slot = i < shown ? i : BAR_MAX;
+		vals[slot] += v;
+		cols[slot] = slot == BAR_MAX ? C_OTHER : PALETTE[t->c[idx[i]].color];
+		tot += v;
+	}
+	for (int y = cy - ro; y <= cy + ro; y++)
+		for (int x = cx - ro; x <= cx + ro; x++) {
+			double dx = x - cx, dy = y - cy, d = sqrt(dx * dx + dy * dy);
+			if (d > ro || d < ri) continue;
+			uint32_t c = C_TRACK;
+			if (tot > 0) {
+				double a = atan2(dx, -dy), f, acc = 0;
+				if (a < 0) a += 2 * M_PI;
+				f = a / (2 * M_PI) * tot;
+				for (int i = 0; i <= BAR_MAX; i++) {
+					if (vals[i] <= 0) continue;
+					acc += vals[i];
+					if (f < acc || i == BAR_MAX) { c = cols[i]; break; }
+				}
+			}
+			lcd_pixel(l, x, y, c);
+		}
+	char num[16];
+	const char *unit;
+	fmt_rate(t->down + t->up, num, sizeof(num), &unit);
+	int inner = 2 * ri * 85 / 100;
+	const font_t *f = lcd_text_w(&FONT_T24B, num, 1) <= inner && ri >= 22 ? &FONT_T24B : &FONT_T16B;
+	if (lcd_text_w(f, num, 1) > inner) f = &FONT_T12;
+	int with_unit = f->h + 12 + 2 <= inner;
+	int ty = cy - (with_unit ? (f->h + 14) / 2 : f->h / 2);
+	lcd_draw(l, f, cx - lcd_text_w(f, num, 1) / 2, ty, num, C_WHITE, LCD_TRANSPARENT, 1);
+	if (with_unit) lcd_draw(l, &FONT_T12, cx - lcd_text_w(&FONT_T12, unit, 1) / 2, ty + f->h + 2, unit, C_DIM, LCD_TRANSPARENT, 1);
+}
+
+#define LEGEND_ROW 17
+
+/* Rows to draw for a legend of at most `rows` lines (the last may be "+k others"). */
+static int legend_rows(const traffic_t *t, int by_total, int rows)
+{
+	int idx[MAX_CL], n = traffic_rank(t, by_total, idx);
+	if (n == 0) return 1;
+	return n > rows ? rows : n;
+}
+
+static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_total, int rows, int y, int name_len)
+{
+	span_t sp = span_for(w, y, LEGEND_ROW);
+	int idx[MAX_CL], n = traffic_rank(t, by_total, idx), r = legend_rows(t, by_total, rows);
+	if (n == 0) {
+		lcd_draw(l, &FONT_T16, sp.x0, y, t->valid ? "No clients" : "No data", C_DIM, LCD_TRANSPARENT, 1);
+		return;
+	}
+	int named = n > r ? r - 1 : n;        /* leave the last row for "+k others" */
+	char nm[48], val[16];
+	for (int i = 0; i < r; i++, y += LEGEND_ROW) {
+		sp = span_for(w, y, LEGEND_ROW);          /* rows near a corner are narrower */
+		if (i < named) {
+			const cl_t *c = &t->c[idx[i]];
+			fmt_short(by_total ? c->total : c->rate, val, sizeof(val));
+			int vw = lcd_text_w(&FONT_T16B, val, 1), room = sp.x1 + 1 - sp.x0 - 12 - vw - 4;
+			if (room > name_len * 8) room = name_len * 8;
+			if (room < 24) nm[0] = 0;                 /* no room for even a short name: chip and value only */
+			else ellipsize(&FONT_T16, c->name, room, 0, nm, sizeof(nm));
+			lcd_rrect(l, sp.x0, y + 4, 8, 8, 2, PALETTE[c->color]);
+			lcd_draw(l, &FONT_T16, sp.x0 + 12, y, nm, C_WHITE, LCD_TRANSPARENT, 1);
+			lcd_draw(l, &FONT_T16B, sp.x1 + 1 - vw, y, val, C_DIM, LCD_TRANSPARENT, 1);
+		} else {
+			double sum = 0;
+			for (int j = named; j < n; j++) sum += by_total ? t->c[idx[j]].total : t->c[idx[j]].rate;
+			char more[24];
+			snprintf(more, sizeof(more), "+%d more", n - named);
+			fmt_short(sum, val, sizeof(val));
+			ellipsize(&FONT_T16, more, sp.x1 + 1 - sp.x0 - 12 - lcd_text_w(&FONT_T16B, val, 1) - 4, 0, nm, sizeof(nm));
+			lcd_rrect(l, sp.x0, y + 4, 8, 8, 2, C_OTHER);
+			lcd_draw(l, &FONT_T16, sp.x0 + 12, y, nm, C_DIM, LCD_TRANSPARENT, 1);
+			lcd_draw(l, &FONT_T16B, sp.x1 + 1 - lcd_text_w(&FONT_T16B, val, 1), y, val, C_DIM, LCD_TRANSPARENT, 1);
+		}
+	}
+}
+
+/* One speed line: arrow, number, unit. */
+static void draw_speed_line(lcd_t *l, span_t sp, int y, int h, int size, int down, double bps, int valid)
+{
+	char num[16];
+	const char *unit;
+	const font_t *f = size >= 24 ? &FONT_T24B : &FONT_T16B;
+	if (valid) fmt_rate(bps, num, sizeof(num), &unit);
+	else { copy(num, sizeof(num), "--"); unit = ""; }
+	draw_tri(l, sp.x0, y + (h - 10) / 2, down, down ? C_DOWN : C_UP);
+	int x = lcd_draw(l, f, sp.x0 + 18, y + (h - f->h) / 2, num, C_WHITE, LCD_TRANSPARENT, 1);
+	lcd_draw(l, &FONT_T12, x + 4, y + (h + f->h) / 2 - 12 - 1, unit, C_DIM, LCD_TRANSPARENT, 1);
+}
+
 /* ---------------------------------------------------------------------------------------- widgets */
 
-typedef struct { const status_t *s; const char *state; int backfill; int row_step; } ctx_t;
+typedef struct { const status_t *s; const traffic_t *tr; const char *state; int backfill; int row_step; int name_len; } ctx_t;
 
 #define PAD 2
 #define RULE_H 6
@@ -431,6 +708,10 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	case W_LANIP: return c->s->lan_ip[0] ? wd->size + PAD : 0;
 	case W_VPN: return strcmp(c->s->vpn_state, "none") && c->s->vpn_state[0] ? wd->size + PAD : 0;
 	case W_RULE: return RULE_H;
+	case W_SPEED: return 2 * (wd->size + PAD);
+	case W_LEGEND: return legend_rows(c->tr, 0, wd->size) * LEGEND_ROW;
+	case W_LEGENDTOTAL: return legend_rows(c->tr, 1, wd->size) * LEGEND_ROW;
+	case W_DONUT: return wd->size + PAD;
 	default: return wd->size + PAD;
 	}
 }
@@ -486,14 +767,29 @@ static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, 
 	case W_RULE:
 		lcd_fill(l, sp.x0, y + h / 2 - 1, sp.x1 - sp.x0 + 1, 2, C_RULE);
 		break;
+	case W_SPEED:
+		draw_speed_line(l, sp, y, h / 2, wd->size, 1, c->tr->down, c->tr->valid);
+		draw_speed_line(l, sp, y + h / 2, h / 2, wd->size, 0, c->tr->up, c->tr->valid);
+		break;
+	case W_SPEEDBAR: draw_share_bar(l, c->tr, 0, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_USAGEBAR: draw_share_bar(l, c->tr, 1, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_USAGE:
+		if (c->tr->valid) fmt_bytes(c->tr->dtot + c->tr->utot, buf, sizeof(buf));
+		else copy(buf, sizeof(buf), "--");
+		row_text(l, sp, y, h, wd->size, "Total", buf, C_WHITE, 0, NULL, 0, &c->row_step);
+		break;
+	case W_LEGEND: draw_legend(l, w, c->tr, 0, wd->size, y, c->name_len); break;
+	case W_LEGENDTOTAL: draw_legend(l, w, c->tr, 1, wd->size, y, c->name_len); break;
+	case W_DONUT: draw_donut(l, c->tr, w->cx, y + h / 2, (wd->size - 2) / 2); break;
 	}
 }
 
 /* ----------------------------------------------------------------------------------------- screen */
 
-static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const screen_t *sc, const status_t *s, const char *state)
+static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const screen_t *sc, const status_t *s, const traffic_t *tr,
+			const char *state)
 {
-	ctx_t c = { s, state, sc->backfill, 0 };
+	ctx_t c = { s, tr, state, sc->backfill, 0, cf->name_len };
 	lcd_fill(l, 0, 0, l->w, l->h, C_BG);
 
 	if (!s->valid) {
@@ -526,7 +822,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 	}
 	for (int i = 0; i < sc->nw; i++) {        /* measure: all rows of a screen share one text size */
 		int t = sc->w[i].type;
-		if (hs[i] && (t == W_WANIP || t == W_LANIP || t == W_VPN || t == W_UPTIME)) widget_draw(NULL, w, &sc->w[i], &c, top, hs[i]);
+		if (hs[i] && (t == W_WANIP || t == W_LANIP || t == W_VPN || t == W_UPTIME || t == W_USAGE)) widget_draw(NULL, w, &sc->w[i], &c, top, hs[i]);
 	}
 	if (nvis) {
 		int spare = bottom - top - total, gap = nvis > 1 ? spare / (nvis + 1) : spare / 2;
@@ -543,6 +839,13 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 	lcd_flush(l);
 }
 
+static int screen_uses_traffic(const screen_t *sc)
+{
+	for (int i = 0; i < sc->nw; i++)
+		if (sc->w[i].type >= W_SPEED) return 1;
+	return 0;
+}
+
 /* Is the backlight off? Rotation pauses then, so the first screen after waking gets its full time. */
 static int backlight_off(void)
 {
@@ -554,18 +857,19 @@ static int backlight_off(void)
 
 int main(int argc, char **argv)
 {
-	const char *cmd = "/usr/libexec/utr-lcd/collect.sh", *conf = "/var/run/utr-lcd/screens.conf";
+	const char *cmd = "/usr/libexec/utr-lcd/collect.sh", *conf = "/var/run/utr-lcd/screens.conf", *tfile = "/var/run/utr-lcd/traffic";
 	int interval = 5, rotate = 1, once = 0, once_screen = 1, list = 0;
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-c") && i + 1 < argc) cmd = argv[++i];
 		else if (!strcmp(argv[i], "-C") && i + 1 < argc) conf = argv[++i];
+		else if (!strcmp(argv[i], "-T") && i + 1 < argc) tfile = argv[++i];
 		else if (!strcmp(argv[i], "-i") && i + 1 < argc) interval = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-N") && i + 1 < argc) once_screen = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-0")) rotate = 0;
 		else if (!strcmp(argv[i], "-1")) once = 1;
 		else if (!strcmp(argv[i], "-l")) list = 1;
 		else {
-			fprintf(stderr, "usage: %s [-c collector] [-C screens.conf] [-i sec] [-0] [-1 [-N screen]] [-l]\n", argv[0]);
+			fprintf(stderr, "usage: %s [-c collector] [-C screens.conf] [-T traffic] [-i sec] [-0] [-1 [-N screen]] [-l]\n", argv[0]);
 			return 2;
 		}
 	}
@@ -602,6 +906,9 @@ int main(int argc, char **argv)
 	int fails = 0, drawn_pos = -1, have_data = 0;
 	long next_collect = 0, switch_at = 0, bl_checked = 0;
 	int dark = 0, trace = getenv("LCD_TRACE") != NULL;
+	traffic_t tr = { 0 }, tr_new;
+	long tr_at = 0;
+	unsigned tr_gen = 0;
 
 	while (!stop) {
 		long now = now_ms();
@@ -626,16 +933,22 @@ int main(int argc, char **argv)
 			switch_at = now + cf.s[order[pos]].dwell_ms;
 		}
 
+		/* traffic data is only read while the screen on show uses it */
+		if (screen_uses_traffic(&cf.s[order[pos]]) && (now - tr_at >= 1000 || tr_at == 0 || pos != drawn_pos)) {
+			traffic_load(&tr_new, tfile);
+			if (memcmp(&tr, &tr_new, sizeof(tr))) { tr = tr_new; tr_gen++; }
+			tr_at = now;
+		}
 		if (have_data) {
 			int up = !strcmp(st.up_state, "up");
 			const char *state = !up ? "noUplink" : fails >= 2 ? "noInternet" : "ready";
 			char up_s[32];
 			fmt_uptime(st.uptime, up_s, sizeof(up_s));
-			snprintf(sig, sizeof(sig), "%d|%s|%d|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s|%d|%s", pos, state, st.valid, st.up_type,
+			snprintf(sig, sizeof(sig), "%u|%d|%s|%d|%s|%s|%s|%s|%s|%d|%d|%d|%s|%s|%s|%d|%s", tr_gen, pos, state, st.valid, st.up_type,
 				 st.up_name, st.up_detail, st.wan_ip, st.lan_ip, st.has_signal, st.signal, st.speed, st.vpn_state,
 				 st.vpn_name, st.inet, st.clients, up_s);
 			if (pos != drawn_pos || strcmp(sig, prev)) {
-				draw_screen(&l, &w, &cf, &cf.s[order[pos]], &st, state);
+				draw_screen(&l, &w, &cf, &cf.s[order[pos]], &st, &tr, state);
 				if (trace) fprintf(stderr, "%ld screen %d\n", now, order[pos] + 1);
 				drawn_pos = pos;
 				copy(prev, sizeof(prev), sig);
