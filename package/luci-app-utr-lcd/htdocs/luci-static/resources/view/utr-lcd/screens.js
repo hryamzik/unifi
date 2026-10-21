@@ -24,6 +24,7 @@ var ROW = 17;
 var TYPES = {
 	ssid:        { label: 'Network name',          group: 'general', sizes: [16, 24, 32], def: 24 },
 	dbm:         { label: 'Signal strength',       group: 'general', sizes: [16, 24, 32], def: 32 },
+	bars:        { label: 'Signal (bars)',         group: 'general', sizes: [16, 24, 32], def: 24 },
 	clients:     { label: 'Client count',          group: 'general', sizes: [16, 24, 32], def: 24 },
 	wanip:       { label: 'WAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
 	lanip:       { label: 'LAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
@@ -45,11 +46,11 @@ var TYPES = {
 };
 
 var DEFAULT_SCREENS = [
-	{ name: 'Status', dwell: '8', enabled: true, indicator: 'dot', backfill: true,
+	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
 	  widgets: [ ['ssid', 24], ['dbm', 32], ['clients', 24] ] },
-	{ name: 'Traffic', dwell: '8', enabled: true, indicator: 'dot', backfill: true,
+	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
 	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
-	{ name: 'Details', dwell: '5', enabled: true, indicator: 'dot', backfill: true,
+	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true,
 	  widgets: [ ['wanip', 16], ['lanip', 16], ['vpn', 16], ['uptime', 16], ['cpu', 16], ['ram', 16], ['flash', 16], ['temp', 16] ] }
 ];
 
@@ -72,10 +73,11 @@ function availableHeight(indicator) {
 	return 233 - (indicator === 'pill' ? 32 : indicator === 'none' ? 6 : 19);
 }
 
-function usedHeight(widgets) {
+function usedHeight(widgets, spacing) {
 	var sum = 0;
 	widgets.forEach(function(w) { sum += widgetHeight(w[0], w[1]); });
-	return sum + (widgets.length > 1 ? GAP * (widgets.length - 1) : 0);
+	var gap = spacing && spacing !== 'auto' ? +spacing : GAP;
+	return sum + (widgets.length > 1 ? gap * (widgets.length - 1) : 0);
 }
 
 function parseWidget(str) {
@@ -93,7 +95,7 @@ function flatten(main, screens) {
 		'fill_dim=' + main.fill_dim, 'fill_edge=' + (main.fill_edge ? 1 : 0), 'name_len=' + main.name_len
 	];
 	screens.forEach(function(s) {
-		out.push('screen=' + String(s.name).replace(/[\r\n]/g, ' '), 'dwell=' + s.dwell, 'enabled=' + (s.enabled ? 1 : 0),
+		out.push('screen=' + String(s.name).replace(/[\r\n]/g, ' '), 'dwell=' + s.dwell, 'spacing=' + (s.spacing || 'auto'), 'enabled=' + (s.enabled ? 1 : 0),
 			'indicator=' + s.indicator, 'backfill=' + (s.backfill ? 1 : 0));
 		s.widgets.forEach(function(w) { out.push('widget=' + w[0] + ':' + w[1]); });
 	});
@@ -110,7 +112,7 @@ function decodeRle(text) {
 			data[pos * 4] = (c >> 16) & 255;
 			data[pos * 4 + 1] = (c >> 8) & 255;
 			data[pos * 4 + 2] = c & 255;
-			data[pos * 4 + 3] = 255;
+			data[pos * 4 + 3] = c === 0xff00ff ? 0 : 255;   /* ff00ff = hidden by the bezel: transparent */
 		}
 	});
 	return { w: w, h: h, data: data, filled: pos };
@@ -180,6 +182,7 @@ return view.extend({
 			if (!Array.isArray(list)) list = [ list ];
 			return {
 				name: s.name || _('Screen'), dwell: s.dwell || '8', enabled: bool(s.enabled, true),
+				spacing: (s.spacing === 'auto' || /^[0-9]+$/.test(s.spacing || '')) ? (s.spacing || 'auto') : 'auto',
 				indicator: [ 'dot', 'pill', 'none' ].indexOf(s.indicator) >= 0 ? s.indicator : 'dot',
 				backfill: bool(s.backfill, true),
 				widgets: list.map(parseWidget).filter(function(w) { return w; })
@@ -187,7 +190,7 @@ return view.extend({
 		});
 		if (!screens.length)
 			screens = DEFAULT_SCREENS.map(function(s) {
-				return { name: s.name, dwell: s.dwell, enabled: s.enabled, indicator: s.indicator, backfill: s.backfill,
+				return { name: s.name, dwell: s.dwell, spacing: s.spacing, enabled: s.enabled, indicator: s.indicator, backfill: s.backfill,
 					widgets: s.widgets.map(function(w) { return w.slice(); }) };
 			});
 
@@ -273,8 +276,8 @@ return view.extend({
 		}
 
 		function screenCard(sc, si) {
-			var avail = availableHeight(sc.indicator), used = usedHeight(sc.widgets), over = used > avail;
-			var remaining = avail - used - (sc.widgets.length ? GAP : 0);
+			var avail = availableHeight(sc.indicator), used = usedHeight(sc.widgets, sc.spacing), over = used > avail;
+			var remaining = avail - used - (sc.widgets.length ? (sc.spacing && sc.spacing !== 'auto' ? +sc.spacing : GAP) : 0);
 
 			var addOptions = [ [ '', _('Add a widget...') ] ], groups = { general: _('General'), traffic: _('Traffic'), resources: _('Resources') };
 			var addSel = E('select', { 'class': 'cbi-input-select', 'change': function() {
@@ -314,6 +317,7 @@ return view.extend({
 					}, 50), ' ', _('s on screen') ]),
 					check(sc.enabled, function(v) { sc.enabled = v; redraw(); }, _('In rotation')),
 					select([ [ 'dot', _('Status dot') ], [ 'pill', _('Status banner') ], [ 'none', _('No status') ] ], sc.indicator, function(v) { sc.indicator = v; redraw(); }),
+					select([ [ 'auto', _('Spacing: auto') ], [ '2', _('Spacing: 2 px') ], [ '4', _('Spacing: 4 px') ], [ '6', _('Spacing: 6 px') ], [ '8', _('Spacing: 8 px') ], [ '12', _('Spacing: 12 px') ], [ '18', _('Spacing: 18 px') ] ], sc.spacing, function(v) { sc.spacing = v; redraw(); }),
 					check(sc.backfill, function(v) { sc.backfill = v; redraw(); }, _('Signal background')),
 					btn('\u2191', function() { move(screens, si, -1); redraw(); }, si === 0, _('Move screen up')),
 					btn('\u2193', function() { move(screens, si, 1); redraw(); }, si === screens.length - 1, _('Move screen down')),
@@ -363,7 +367,7 @@ return view.extend({
 					select([ [ 'none', _('As is') ], [ 'weak', _('What if: weak Wi-Fi') ], [ 'ethernet', _('What if: wired uplink') ], [ 'nouplink', _('What if: no uplink') ],
 						[ 'nointernet', _('What if: no internet') ], [ 'vpnup', _('What if: VPN connected') ], [ 'vpndown', _('What if: VPN down') ], [ 'novpn', _('What if: no VPN') ] ],
 						preview.scenario, function(v) { preview.scenario = v; schedulePreview(); }),
-					E('small', { 'style': 'opacity:.7' }, _('The preview is drawn by the router itself with the settings on this page, saved or not. Dark grey areas are hidden by the bezel.'))
+					E('small', { 'style': 'opacity:.7' }, _('The preview is drawn by the router itself with the settings on this page, saved or not. The rounded corners are cut off by the bezel.'))
 				])
 			]);
 		}
@@ -386,7 +390,7 @@ return view.extend({
 			globals, container,
 			E('div', {}, btn(_('Add screen'), function() {
 				if (screens.length >= 12) return;
-				screens.push({ name: _('Screen') + ' ' + (screens.length + 1), dwell: '8', enabled: true, indicator: 'dot', backfill: true, widgets: [] });
+				screens.push({ name: _('Screen') + ' ' + (screens.length + 1), dwell: '8', spacing: 'auto', enabled: true, indicator: 'dot', backfill: true, widgets: [] });
 				redraw();
 			}, false))
 		]);
@@ -419,6 +423,7 @@ return view.extend({
 			var sid = uci.add('utr-lcd', 'screen');
 			uci.set('utr-lcd', sid, 'name', s.name);
 			uci.set('utr-lcd', sid, 'dwell', s.dwell);
+			uci.set('utr-lcd', sid, 'spacing', s.spacing || 'auto');
 			uci.set('utr-lcd', sid, 'enabled', s.enabled ? '1' : '0');
 			uci.set('utr-lcd', sid, 'indicator', s.indicator);
 			uci.set('utr-lcd', sid, 'backfill', s.backfill ? '1' : '0');
