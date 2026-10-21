@@ -199,6 +199,7 @@ static inline int lcd_text_w(const font_t *f, const char *s, int scale)
 /* Draw a string with font f; returns the x position after the last char. */
 static int lcd_draw(lcd_t *l, const font_t *f, int x, int y, const char *s, uint32_t fg, uint32_t bg, int scale)
 {
+	if (!l) return x;   /* measure pass (widget_draw with a NULL display) must never draw */
 	for (; *s; s++, x += f->w * scale)
 		lcd_glyph(l, f, x, y, *s, fg, bg, scale);
 	return x;
