@@ -689,7 +689,9 @@ static void ellipsize(const font_t *f, const char *s, int maxw, int middle, char
 	int maxc = maxw / f->w, len = (int)strlen(s);
 	if (maxc < 3) maxc = 3;
 	if (len <= maxc) { copy(out, n, s); return; }
-	if (middle) {
+	if (middle == 2) {          /* keep the tail (IP addresses: the host end is the telling part) */
+		snprintf(out, n, "..%s", s + len - (maxc - 2));
+	} else if (middle) {
 		int head = (maxc - 2 + 1) / 2, tail = maxc - 2 - head;
 		snprintf(out, n, "%.*s..%s", head, s, s + len - tail);
 	} else {
@@ -989,7 +991,11 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 			int vw = lcd_text_w(vf, val, 1), room = sp.x1 + 1 - sp.x0 - 12 - vw - 4;
 			if (room > (name_len < 12 ? 12 : name_len) * nf->w) room = (name_len < 12 ? 12 : name_len) * nf->w;
 			if (room < 24) nm[0] = 0;                 /* no room for even a short name: chip and value only */
-			else ellipsize(nf, c->name, room, 0, nm, sizeof(nm));
+			else {
+				int ip = 1;          /* an IP used as a name is trimmed from the left, not the right */
+				for (const char *q = c->name; *q; q++) if (!(*q >= '0' && *q <= '9') && *q != '.' && *q != ':') { ip = 0; break; }
+				ellipsize(nf, c->name, room, ip && strchr(c->name, '.') ? 2 : 0, nm, sizeof(nm));
+			}
 			int bw = 0;
 			if (hasbg && bgmax > 0) {                 /* background bar: this client's share of the widest */
 				uint32_t col = dim_color(bar_color(PALETTE[c->color]), 65);
