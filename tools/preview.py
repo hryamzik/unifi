@@ -4,7 +4,7 @@
   preview.py in.ppm out.png [--rotate 180|0] [--scale 3] [--no-bezel]
 
 Rotates into the viewing orientation and, unless --no-bezel, greys out what the bezel hides
-(measured window, see docs/decisions.md): raw x 1..130, y 3..237 visible, corners rounded r=16.
+(measured window, see docs/decisions.md): raw x 1..130, y 3..237 visible, corners rounded r=31.
 """
 import struct, sys, zlib
 
@@ -20,7 +20,7 @@ w, h = map(int, parts[1].split())
 pix = parts[3]
 img = [[tuple(pix[(y * w + x) * 3:(y * w + x) * 3 + 3]) for x in range(w)] for y in range(h)]
 
-VX0, VX1, VY0, VY1, R = 1, 130, 3, 237, 16
+VX0, VX1, VY0, VY1, R = 1, 130, 3, 237, 31   # corner radius measured with tools/measure-bezel.py
 
 
 def visible(x, y):

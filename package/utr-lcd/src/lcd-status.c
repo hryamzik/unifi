@@ -241,7 +241,7 @@ int main(int argc, char **argv)
 	/*
 	 * Visible window of the glass, measured with a calibration grid photographed straight on (see
 	 * docs/decisions.md): in the mounted orientation the bezel hides ~5 px at the viewer's left,
-	 * ~1 px at the right, and rounds the corners (~16 px radius). Keep 6 px of margin beyond that.
+	 * ~1 px at the right, and rounds the corners (~31 px radius, measured). Keep 6 px of margin beyond that.
 	 */
 	int clip_l = rotate ? 5 : 1, clip_r = rotate ? 1 : 5;
 	geom_t g = { .x0 = clip_l + 8, .x1 = l.w - 1 - clip_r - 10 };
