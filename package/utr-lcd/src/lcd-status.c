@@ -801,6 +801,15 @@ static uint32_t bar_color(uint32_t c)
 	return RGB(r > 255 ? 255 : r, g > 255 ? 255 : g, b > 255 ? 255 : b);
 }
 
+/* Text over a bar whose fill may end mid-string: a 1 px shadow in the opposite tone keeps it
+ * readable on the bright segment and on the dark track/background alike. */
+static void draw_halo(lcd_t *l, const font_t *f, int x, int y, const char *s, uint32_t col)
+{
+	uint32_t sh = col == RGB(10, 12, 16) ? RGB(235, 238, 245) : RGB(10, 12, 16);
+	lcd_draw(l, f, x + 1, y + 1, s, sh, LCD_TRANSPARENT, 1);
+	lcd_draw(l, f, x, y, s, col, LCD_TRANSPARENT, 1);
+}
+
 static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int y, int w, int h, int dir, int showval)
 {
 	int idx[MAX_CL], n = traffic_rank_m(t, mode, idx), k = 0;
@@ -842,7 +851,7 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 		const char *unit;
 		fmt_rate(dir ? t->down : t->up, num, sizeof(num), &unit);
 		snprintf(val, sizeof(val), "%s %s", num, unit);
-		lcd_draw(l, &FONT_T12, x + 15, y + (h - FONT_T12.h) / 2, val, RGB(10, 12, 16), LCD_TRANSPARENT, 1);
+		draw_halo(l, &FONT_T12, x + 15, y + (h - FONT_T12.h) / 2, val, RGB(10, 12, 16));
 	}
 }
 
@@ -861,7 +870,7 @@ static void draw_total_bar(lcd_t *l, const traffic_t *t, int down, int x, int y,
 	const font_t *f = h >= 20 ? &FONT_T16B : &FONT_T12;
 	int x0 = x + 5, ty = y + (h - f->h) / 2;
 	draw_tri(l, x0, ty + (f->h - 10) / 2, down, RGB(10, 12, 16));
-	lcd_draw(l, f, x0 + 18, ty, val, RGB(10, 12, 16), LCD_TRANSPARENT, 1);
+	draw_halo(l, f, x0 + 18, ty, val, RGB(10, 12, 16));
 }
 
 /* Ring split by client; the centre holds the total speed in the largest font that fits inside. */
@@ -981,13 +990,14 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 			int bw = 0;
 			if (hasbg && bgmax > 0) {                 /* background bar: this client's share of the widest */
 				uint32_t col = dim_color(bar_color(PALETTE[c->color]), 65);
-				if (split && (maxd > 0 || maxu > 0)) {          /* upload: thin strip on top; download below, no gap */
+				if (split && (maxd > 0 || maxu > 0)) {          /* upload: thin darker strip on top; download below, no gap */
 					int bh = pitch - 1, uh = bh / 3, spanw = sp.x1 + 1 - sp.x0;
 					double dv = bgmode == BM_TOTAL ? c->dtot : c->drate, uv = bgmode == BM_TOTAL ? c->utot : c->urate;
-					int uw = maxu > 0 ? spanw * (int)(uv * 100 / maxu) / 100 : 0;
-					int dw = maxd > 0 ? spanw * (int)(dv * 100 / maxd) / 100 : 0;
+					double den = maxd > maxu ? maxd : maxu;          /* one scale for both: 30 down / 10 up shows up at a third */
+					int uw = spanw * (int)(uv * 100 / den) / 100;
+					int dw = spanw * (int)(dv * 100 / den) / 100;
 					if (uh < 2) uh = 2;
-					if (uw > 0) lcd_fill(l, sp.x0, y, uw, uh, col);
+					if (uw > 0) lcd_fill(l, sp.x0, y, uw, uh, dim_color(col, 65));
 					if (dw > 0) lcd_fill(l, sp.x0, y + uh, dw, bh - uh, col);
 					bw = uw > dw ? uw : dw;
 				} else {
@@ -1004,8 +1014,8 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 			}
 			int cs = step >= 2 ? 6 : 8;
 			lcd_rrect(l, sp.x0, y + (pitch - cs) / 2, cs, cs, 2, PALETTE[c->color]);
-			lcd_draw(l, nf, sp.x0 + 12, y + (pitch - nf->h) / 2, nm, namecol, LCD_TRANSPARENT, 1);
-			lcd_draw(l, vf, sp.x1 + 1 - vw, y + (pitch - vf->h) / 2, val, valcol, LCD_TRANSPARENT, 1);
+			draw_halo(l, nf, sp.x0 + 12, y + (pitch - nf->h) / 2, nm, namecol);
+			draw_halo(l, vf, sp.x1 + 1 - vw, y + (pitch - vf->h) / 2, val, valcol);
 		} else {
 			double sum = 0;
 			for (int j = named; j < n; j++) sum += by_total ? t->c[idx[j]].total : t->c[idx[j]].rate;
