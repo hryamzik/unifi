@@ -804,8 +804,8 @@ static uint32_t bar_color(uint32_t c)
 static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int y, int w, int h, int dir, int showval)
 {
 	int idx[MAX_CL], n = traffic_rank_m(t, mode, idx), k = 0;
-	double vals[BAR_MAX + 1], tot = 0, others = 0;
-	uint32_t cols[BAR_MAX + 1];
+	double vals[BAR_MAX + 2], tot = 0, others = 0;
+	uint32_t cols[BAR_MAX + 2];
 	for (int i = 0; i < n; i++) {
 		double v = client_val(&t->c[idx[i]], mode);
 		if (v <= 0) continue;
@@ -814,6 +814,13 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 		tot += v;
 	}
 	if (others > 0) { vals[k] = others; cols[k] = bar_color(C_OTHER); k++; }
+	/* What no client accounts for - the router itself, missed stations - is the gap between the
+	 * interface total and the sum of the clients, drawn white (beyond 2%: counter read jitter).
+	 * With it, the bar is scaled by the real total instead of renormalising the clients. */
+	double overall = mode == BM_DRATE ? t->down : mode == BM_URATE ? t->up :
+		mode == BM_DTOTAL ? t->dtot : mode == BM_UTOTAL ? t->utot :
+		mode == BM_TOTAL ? t->dtot + t->utot : t->down + t->up;
+	if (overall > 0 && overall - tot > overall * 0.02) { vals[k] = overall - tot; cols[k] = C_BAR_NODATA; k++; tot = overall; }
 	lcd_rrect(l, x, y, w, h, 3, k ? C_TRACK : C_BAR_NODATA);
 	double acc = 0;
 	for (int i = 0; i < k && tot > 0; i++) {
