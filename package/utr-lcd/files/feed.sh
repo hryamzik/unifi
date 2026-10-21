@@ -5,12 +5,19 @@
 #   UTR_RUN       state dir (default /var/run/utr-lcd)
 #   UTR_LIBEXEC   helper dir (default /usr/libexec/utr-lcd)
 #   UTR_THEME     blue|aqua|green|pink|yellow|orange|purple (default blue)
+#   UTR_BRIGHTNESS backlight percent 1-100 (default: leave the UI's own value)
+#   UTR_TIMEOUT   screen timeout in seconds, 0 = always on (default 0); raise-to-wake is wake.sh's job
 #   UTR_INTERVAL  seconds between updates (default 3)
 BASE=${UTR_RUN:-/var/run/utr-lcd}
 LIBEXEC=${UTR_LIBEXEC:-/usr/libexec/utr-lcd}
 COLLECT=$LIBEXEC/collect.sh
 THEME=${UTR_THEME:-blue}
 INTERVAL=${UTR_INTERVAL:-3}
+TIMEOUT=${UTR_TIMEOUT:-0}
+case "$TIMEOUT" in ''|*[!0-9]*) TIMEOUT=0 ;; esac
+BRIGHT=${UTR_BRIGHTNESS:-}
+case "$BRIGHT" in ''|*[!0-9]*) BRIGHT="" ;; esac
+[ -n "$BRIGHT" ] && { [ "$BRIGHT" -lt 1 ] && BRIGHT=1; [ "$BRIGHT" -gt 100 ] && BRIGHT=100; }
 CALL=$LIBEXEC/ui-call.sh
 mkdir -p "$BASE"
 fails=0
@@ -70,6 +77,10 @@ while :; do
 
 	json=$(printf '{"clients":%d,"meshUplinkInterface":"%s","meshLinkSpeed":%d,"meshSsid":"%s","meshStatus":"connected","vpnStatus":"%s","vpnName":"%s","vpnType":"%s","theme":"%s"}' \
 		"${clients:-0}" "$iface" "${up_speed:-0}" "$(jstr "$up_name")" "$vs" "$(jstr "$vpn_name")" "$vt" "$THEME")
+	[ -n "$BRIGHT" ] && json="${json%\}},\"brightness\":$BRIGHT}"
+	# the stock UI only honours the timeout while raiseToWake is on
+	if [ "$TIMEOUT" -gt 0 ]; then json="${json%\}},\"raiseToWake\":true,\"screenTimeout\":$TIMEOUT}"
+	else json="${json%\}},\"raiseToWake\":false}"; fi
 	sig="$state|$json"
 	if [ "$sig" != "$last" ]; then
 		# only remember the new signature once the UI accepted it (it may still be starting)

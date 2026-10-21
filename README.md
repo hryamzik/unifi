@@ -11,7 +11,7 @@ Two display modes (`mode` in `/etc/config/utr-lcd`):
 | `native` | Built-in high-contrast status screen, tuned for off-axis viewing | nothing, ships in the package |
 | `stock` | The original Ubiquiti UI (pixel-identical, themes, signal bars, ...) fed with OpenWrt data | optional bundle you build from **your own** firmware |
 
-`auto` (default) uses `stock` when the bundle is installed, otherwise `native`.
+`auto` (default) uses `stock` when the bundle is installed, otherwise `native`. `stock` without the bundle also falls back to `native` (logged).
 
 ## Requirements
 
@@ -65,9 +65,11 @@ from flash except the bundle itself (~7 MB in `/usr/share/utr-lcd/stock`).
 | `mode` | `auto` | `auto`, `native`, `stock` |
 | `interval` | `3` | seconds between status refreshes |
 | `rotate` | `180` | panel rotation (`180` on the UTR-LR, which is mounted upside-down; or `0`) |
-| `brightness` | empty | backlight percent 1-100, applied when the service starts; empty leaves it alone |
+| `brightness` | empty | backlight percent 1-100; empty leaves it alone (stock mode otherwise starts at 80) |
 | `theme` | `blue` | stock mode: `blue aqua green pink yellow orange purple` |
-| `offset_x`, `offset_y` | `0` | stock mode: placement of the 135x240 image in the 136x240 panel |
+| `offset_x`, `offset_y` | `2`, `0` | stock mode: placement of the 135x240 image in the 136x240 panel (calibrated on the glass) |
+| `screen_timeout` | `0` | stock mode: blank the screen after this many seconds (20-300); `0` keeps it always on |
+| `wake_on_motion` | `1` | stock mode: with a timeout, wake the screen when the router is moved (accelerometer) |
 
 ## How it works
 

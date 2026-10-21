@@ -18,14 +18,18 @@ fw/ build/ scratch/     local only, git-ignored (firmware images, build output, 
 3. `tools/build-package.sh`; the C code compiles with the OpenWrt toolchain, so SDK warnings are real.
 4. Deploy with the two `ssh` commands from `AGENTS.md` (asks the user first: it is a router install).
 5. `ssh root@192.168.1.1 "ps | grep -E 'ubusd -s|libc.so|utr-lcd|feed.sh'; logread | grep -E 'utr-lcd|stock-run|feed.sh' | tail"`
-6. Ask the user to look at the panel; photos from the user are the only visual feedback, taken at ~90 degrees.
+6. Look at the panel with the camera loop below (needs an iPhone/iPad pointed at the panel and connected over USB); otherwise ask the user for a photo taken at ~90 degrees.
 
 Quick RAM-only experiments: copy a binary to `/tmp`, stop the service first (`/etc/init.d/utr-lcd stop`; only one process can drive the DRM panel), run it, restart the service afterwards. BusyBox has no `nohup`; use `(cmd &)`.
+
+Camera loop: `tools/lcd-shot.sh build/cam/x.jpg [PROG [ARGS...]]` finds the iPhone camera (avfoundation, not Desk View), optionally copies a static armv7 PROG to the router `/tmp`, stops the service, runs it, waits for exposure, saves the photo (rotated upright) and restarts the service. Cross-build helpers: `tools/extras/build-arm.sh` (test programs) or the alpine arm/v7 `gcc -static` one-liner for `lcd-status`. Crop with `ffmpeg -vf "crop=300:430:880:450,scale=720:-1:flags=lanczos"` (depends on the phone position). Use a new file name per shot: the image viewer caches by path. `tools/preview.sh [out.png]` renders the native layout offline from `build/fake-collect.sh` through the mock backend (bezel mask included).
 
 Offline screen captures of the stock UI (no router): run `ulcmd` from a bundle under qemu-user in docker with `utr-lcd-fbshim.so`, feed it with `ubus call ui ...`, convert `fb0.raw` with `tools/rgb565_to_png.py in.raw out.png 135 240 3`.
 
 ## Gotchas found so far
 
+- `/etc/init.d/utr-lcd stop` returns before the old process has released the DRM display; a new process started at once gets `setcrtc: Permission denied` and the panel stays black. Wait for the processes to exit (`lcd-shot.sh` does).
+- BusyBox `sleep` takes whole seconds only (a fractional value errors out).
 - BusyBox `tar` lacks `--strip-components`; BusyBox has no `nohup`; fractional `sleep` is not guaranteed.
 - macOS `sed -i` needs `-i ''`; a failed `sed` in an `&&` chain silently skips the rest.
 - `ssh ... 'cat > file'` takes one stdin per invocation; copy files in separate ssh calls.

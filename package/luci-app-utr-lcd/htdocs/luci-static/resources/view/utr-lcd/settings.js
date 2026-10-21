@@ -69,10 +69,13 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'mode', _('Display mode'),
-			_('Automatic uses the stock UniFi look when its bundle is installed, otherwise the built-in renderer.'));
+			status.stock_installed
+				? _('Automatic uses the stock UniFi look (its bundle is installed).')
+				: _('The stock UniFi look is not installed (see the README, optional stock bundle), so the built-in renderer is used.'));
 		o.value('auto', _('Automatic'));
 		o.value('native', _('Built-in renderer'));
-		o.value('stock', _('Stock UniFi look (needs the stock bundle)'));
+		if (status.stock_installed)
+			o.value('stock', _('Stock UniFi look'));
 		o.default = 'auto';
 
 		o = s.option(form.Value, 'interval', _('Refresh interval'), _('Seconds between status updates.'));
@@ -87,7 +90,7 @@ return view.extend({
 		o.default = '180';
 
 		o = s.option(form.Value, 'brightness', _('Brightness'),
-			_('Backlight in percent (1-100), applied when the service starts. Empty leaves it unchanged.'));
+			_('Backlight in percent (1-100). Empty leaves it unchanged (the stock UniFi look starts at 80).'));
 		o.datatype = 'range(1,100)';
 		o.optional = true;
 		o.placeholder = '100';
@@ -103,13 +106,27 @@ return view.extend({
 		o = s.option(form.Value, 'offset_x', _('Horizontal offset'),
 			_('Stock UniFi look only: shifts the 135 px wide image inside the 136 px panel, in pixels.'));
 		o.datatype = 'range(-8,8)';
-		o.default = '0';
+		o.default = '2';
 		o.depends('mode', 'auto');
 		o.depends('mode', 'stock');
 
 		o = s.option(form.Value, 'offset_y', _('Vertical offset'), _('Stock UniFi look only, in pixels.'));
 		o.datatype = 'range(-8,8)';
 		o.default = '0';
+		o.depends('mode', 'auto');
+		o.depends('mode', 'stock');
+
+		o = s.option(form.Value, 'screen_timeout', _('Screen timeout'),
+			_('Stock UniFi look only: blank the screen after this many seconds without activity (20-300). 0 keeps it always on.'));
+		o.datatype = 'or(0,range(20,300))';
+		o.default = '0';
+		o.depends('mode', 'auto');
+		o.depends('mode', 'stock');
+
+		o = s.option(form.Flag, 'wake_on_motion', _('Wake on motion'),
+			_('Stock UniFi look only: wake the screen when the router is moved (uses the built-in accelerometer).'));
+		o.default = o.enabled;
+		o.rmempty = false;
 		o.depends('mode', 'auto');
 		o.depends('mode', 'stock');
 

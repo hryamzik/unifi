@@ -7,6 +7,7 @@ LCD status display (OpenWrt packages `utr-lcd` and `luci-app-utr-lcd`) for the U
 Build packages (apk, snapshot): `tools/build-package.sh` -> `build/sdk-out/ipq40xx-generic-master/*.apk` (both packages) (docker, first run downloads the SDK into a cached volume)
 Build package (ipk, opkg releases): `tools/build-package.sh ipq40xx-generic-24.10.4` -> `build/sdk-out/ipq40xx-generic-24.10.4/*.ipk`
 Build C only (Linux, DRM headers needed): `make -C package/utr-lcd/src` (verified in alpine with `libdrm-dev`); hardware test programs: `make -C tools/extras`
+Look at the panel yourself: `tools/lcd-shot.sh build/cam/<new-name>.jpg [PROG [ARGS]]` (iPhone camera on USB pointed at the panel; see `docs/development.md`); offline preview of the native layout: `tools/preview.sh`; regenerate fonts: `tools/gen-fonts.sh`
 Build stock bundle from a firmware image: `tools/make-stock-bundle.sh fw/<firmware>.bin build/utr-ui-stock.tar.gz` (docker)
 Syntax-check scripts: `sh -n package/utr-lcd/files/*.sh package/utr-lcd/files/utr-lcd.init package/luci-app-utr-lcd/root/usr/libexec/utr-lcd/luci-status`
 Deploy to the router: `ssh root@192.168.1.1 'cat > /tmp/utr-lcd.apk' < build/sdk-out/ipq40xx-generic-master/utr-lcd-*.apk`, then `ssh root@192.168.1.1 'apk add --allow-untrusted --force-reinstall /tmp/utr-lcd.apk'`
@@ -22,7 +23,7 @@ Autonomous: read-only SSH, logs, source research, firmware download and offline 
 Ask first: package install or removal on the router, any persistent router configuration, flash/MTD writes, reboot, bootloader changes, kernel modules, GPIO/SPI/I2C pokes. The user's approval for one of these covers that action only.
 Run Ubiquiti binaries only through `package/utr-lcd/files/stock-run.sh` (own musl loader, `utr-lcd-fbshim.so` refusing `system()`/`popen()`, private ubus). Call the stock UI through `ui-call.sh`, which exposes state/info/userActivity/locate and nothing else.
 Keep SSH and LAN reachable and the stock recovery partition (`kernel0`) untouched; never write `kernel0`, bootloader, ART, EEPROM or boot-selection partitions.
-State verified facts as verified and label hypotheses as hypotheses (open one: panel window offset, see `docs/decisions.md`).
+State verified facts as verified and label hypotheses as hypotheses (open ones are listed in `docs/decisions.md`).
 
 ## Git and ownership
 

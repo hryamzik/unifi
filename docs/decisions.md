@@ -8,7 +8,7 @@ Short records of why things are the way they are. Verified facts are marked (ver
 - No `/dev/fb0`. Drawing uses DRM dumb buffers (XRGB8888): `SETCRTC` once, then `DIRTYFB` per update. Connector `SPI-1` needs the `SETCRTC`.
 - Backlight: `/sys/class/backlight/backlight` (pwm, max 100).
 - The panel is mounted upside down on the LR: stock sets `rotation=180`. We rotate in software (`lcd_open(..., flip_x, flip_y)`), config option `rotate`.
-- Stock panel geometry is 135x240 with GRAM offset col 53 / row 40; OpenWrt uses 136x240 without offset. Photos showed the left ~12 px and right ~4 px of the logical view clipped, plus the bottom when viewed at an angle (hypothesis: the offset mismatch; not calibrated). The native layout works around it with margins (`MARGIN_L 12`, `MARGIN_R 4`); stock mode exposes `offset_x` / `offset_y` for tuning.
+- Stock panel geometry is 135x240 with GRAM offset col 53 / row 40; OpenWrt uses 136x240 without offset. Calibrated with a straight-on photo of a coordinate grid (`tools/extras/lcdgrid.c`): the visible window is raw x 1..130 and y 3..237. In viewer coordinates (after the 180 degree rotation) about 5 px are hidden at the left, 1 at the right, 2 at the top and 3 at the bottom, and the corner radius is about 16-20 px. The native renderer takes its margins from that (`clip_l`/`clip_r` in `lcd-status.c`); the stock 135 px wide image is centred in the window with `offset_x` 2 (verified with the camera; `offset_y` 0).
 - Viewing angle matters: the panel looks different off-axis, so the native renderer uses black background, large high-contrast text, no 1 px lines, and words for every state.
 - Router runs OpenWrt SNAPSHOT (apk); stable releases use opkg, hence both `.apk` and `.ipk` builds.
 
@@ -23,6 +23,7 @@ The package works with the built-in renderer alone. The Ubiquiti-style UI is an 
 ### Stock UI runs under a shim, own loader, private ubus
 - The stock binaries are soft-float ARM musl; OpenWrt is hard-float. They start through the bundle's own `libc.so --library-path`.
 - `utr-lcd-fbshim.so` (LD_PRELOAD) fakes `/dev/fb0` as `/var/run/utr-lcd/fb0.raw` (135x240 RGB565), redirects `/proc/net/wireless` to a file we write (so the stock UI shows our real Wi-Fi signal as `ath4`), and refuses `system()`/`popen()` so the UI cannot run poweroff/reboot. It logs each refusal (`shim.log`); the only one seen is `mkdir -p /etc/ulcmd`.
+- The UI applies a setting (theme, brightness, ...) only after saving it to `/etc/ulcmd/ulcmd.conf` (`key=value` lines). That directory does not exist on OpenWrt, so every change used to be dropped silently (verified: themes did not change although `cb_Theme` was delivered). The shim redirects that path to `$FBSHIM_CONF` (`/var/run/utr-lcd/ulcmd.conf`, RAM), which keeps flash untouched; settings are pushed again by `feed.sh` on every start.
 - A private `ubusd` listens on `/var/run/ubus.sock`; OpenWrt's ubus (`/var/run/ubus/ubus.sock`) is not touched. The OpenWrt-native `ubusd`/`ubus` are used for it (verified compatible with the stock `ulcmd`), so the bundle only needs `ulcmd` and its libraries.
 - `feed.sh` replaces Ubiquiti's `mcad`: it maps OpenWrt state to the stock `ui info` / `ui state` ubus calls (`ready`, `noUplink`, `noInternet`). Uplink type maps to `ath4` (Wi-Fi), `usb0`, `eth0`; WireGuard/Tailscale/OpenVPN interfaces map to the VPN page. It never calls shutdown/restart/reset states.
 - `utr-lcd-fb2drm` copies `fb0.raw` to the panel through DRM (rotation, optional offset).
@@ -43,7 +44,7 @@ The repository owner, Roman Belyakovsky, is the sole author of all commits and P
 
 ## Open items
 
-- Calibrate the panel window offset on the glass (hypothesis above).
-- Screen timeout, night mode and raise-to-wake (stock settings, accelerometer) are not wired; brightness is applied at service start only.
+- Night mode (`nightModeBegins`/`nightModeEnds` in `ui info`) is not wired or verified.
+- Raise-to-wake is our own `wake.sh` (polls the LIS2DW12 accelerometer once a second, calls `ui userActivity` on a change of more than 80 raw units, about 0.08 g); the threshold is a guess, tune it by handling the router.
 - USB-tether, VPN and `noInternet` paths exist in `collect.sh`/`feed.sh` but are only tested offline.
 - The UTR (non-LR) variant is untested; rotation differs there (`rotate 0`).

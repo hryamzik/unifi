@@ -64,6 +64,14 @@ connected. VPN type is Teleport, WireGuard or OpenVPN (label **Teleport** etc., 
 - brightness 1..100 (default 100); screen timeout 20..300 s (default 30) when raise-to-wake is on
 - night mode begins/ends (HH:MM), raise-to-wake (accelerometer), motion sensitivity 1..5, timezone
 
+## The `ui` ubus object (verified on the router, `ubus -s /var/run/ubus.sock -v list ui`)
+
+- `info`: `brightness`, `clients`, `meshLinkSpeed`, `meshSsid`, `meshStatus`, `meshUplinkInterface`, `nightModeBegins`, `nightModeEnds`, `pin`, `raiseToWake`, `screenTimeout`, `theme`, `usbName`, `vpnConnectionTime`, `vpnName`, `vpnStatus`, `vpnType`. Settings travel in `info`; there is no separate settings method. Partial payloads are fine.
+- `state{value}`, `userActivity{value}`, `locate{value}`, `upgrade{seconds}`, and `reset`, `restart`, `shutdown` (never exposed by `ui-call.sh`).
+- `ulcmd -d -c` logs every callback (`Data cb_Theme green`, `Settings: Saving: ...`); useful to debug. Settings are persisted to `/etc/ulcmd/ulcmd.conf` (the shim keeps it in RAM).
+- Screen timeout (verified): with `raiseToWake` true and `screenTimeout` N the backlight dims at about 75% of N, is off at N, and `userActivity` wakes it. Brightness defaults to 80 at start unless `info` carries `brightness`.
+- Wake source: the board has a LIS2DW12 accelerometer (`/sys/bus/iio/devices/iio:device0`, about 1000 raw per g, 1 Hz default sampling, Z near -1030 on the upside-down LR).
+
 ## Web sources
 
 - Display is a 1.14" non-touch status display: shows the repeated Wi-Fi network, uplink
