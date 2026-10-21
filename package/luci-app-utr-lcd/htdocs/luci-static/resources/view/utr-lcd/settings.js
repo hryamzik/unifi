@@ -134,6 +134,12 @@ return view.extend({
 		o.default = '0';
 		o.placeholder = '0';
 
+		o = s.option(form.Value, 'motion_threshold', _('Motion sensitivity'),
+			_('Change in milli-g (1000 = 1 g) that counts as motion and restores full brightness. Lower is more sensitive; below about 30 the sensor noise wakes the screen. Used with Dim after / Turn off after.'));
+		o.datatype = 'range(20,2000)';
+		o.default = '80';
+		o.placeholder = '80';
+
 		var statusTable = E('table', { 'class': 'table' }, statusRows(status));
 
 		poll.add(function() {

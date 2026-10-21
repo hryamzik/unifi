@@ -70,6 +70,7 @@ from flash except the bundle itself (~7 MB in `/usr/share/utr-lcd/stock`).
 | `offset_x`, `offset_y` | `2`, `0` | stock mode: placement of the 135x240 image in the 136x240 panel (calibrated on the glass) |
 | `dim_after` | `0` | both modes: dim the backlight after this many seconds without motion; `0` never dims |
 | `dim_level` | `15` | backlight percent while dimmed |
+| `motion_threshold` | `80` | motion that restores full brightness, in milli-g (1000 = 1 g); lower is more sensitive, below about 30 the sensor noise triggers it |
 | `screen_timeout` | `0` | both modes: turn the backlight off after this many seconds without motion; `0` never turns it off. Moving the router restores full brightness |
 
 ## How it works

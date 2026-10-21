@@ -7,7 +7,8 @@
 #   UTR_DIM_AFTER  seconds without motion before dimming, 0 = never dim (default 0)
 #   UTR_DIM_LEVEL  backlight percent while dimmed (default 15)
 #   UTR_OFF_AFTER  seconds without motion before the backlight goes off, 0 = never (default 0)
-#   UTR_WAKE_THR   raw accelerometer units that count as motion, ~1000 per g (default 80)
+#   UTR_WAKE_THR   change that counts as motion, in milli-g (default 80); the sensor reports ~1 raw unit per
+#                  milli-g, noise is about +-15, so values below ~30 wake on vibration
 #   UTR_RUN        scratch dir (default /var/run/utr-lcd)
 #   UTR_IIO        accelerometer directory (default /sys/bus/iio/devices/iio:device0)
 BL=${UTR_BACKLIGHT:-/sys/class/backlight/backlight}

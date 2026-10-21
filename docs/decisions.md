@@ -45,6 +45,6 @@ The repository owner, Roman Belyakovsky, is the sole author of all commits and P
 ## Open items
 
 - Night mode (`nightModeBegins`/`nightModeEnds` in `ui info`) is not wired or verified.
-- Idle dimming, blanking and wake-on-motion are our own `power.sh` (both modes, backlight only): it reads the LIS2DW12 accelerometer (three parallel sysfs reads, each blocks about 2 s) and treats a change of more than 80 raw units (about 0.08 g) as motion; the threshold is a guess, tune it by handling the router. The stock UI's own timeout is kept off (`raiseToWake` false) because it is all-or-nothing (dim then off, no way to stay dimmed) and left the screen dark after a restart with timeout 0. The init script also restores a zero backlight on every start.
+- Idle dimming, blanking and wake-on-motion are our own `power.sh` (both modes, backlight only): it reads the LIS2DW12 accelerometer (three parallel sysfs reads, each blocks about 2 s) and treats a change of more than `motion_threshold` (default 80 milli-g; the sensor gives about 1 raw unit per milli-g, noise about +-15) as motion; the default is a guess, tune it by handling the router. The stock UI's own timeout is kept off (`raiseToWake` false) because it is all-or-nothing (dim then off, no way to stay dimmed) and left the screen dark after a restart with timeout 0. The init script also restores a zero backlight on every start.
 - USB-tether, VPN and `noInternet` paths exist in `collect.sh`/`feed.sh` but are only tested offline.
 - The UTR (non-LR) variant is untested; rotation differs there (`rotate 0`).
