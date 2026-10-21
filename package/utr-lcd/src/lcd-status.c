@@ -185,7 +185,7 @@ static const uint32_t PALETTE[TRAFFIC_COLORS] = {
 	RGB(40, 210, 170), RGB(255, 100, 100), RGB(60, 120, 255), RGB(255, 150, 200), RGB(120, 255, 190), RGB(200, 160, 80) };
 #define C_OTHER RGB(120, 130, 150)
 #define C_TRACK RGB(40, 46, 64)
-#define C_TRACK_EMPTY RGB(22, 25, 35)   /* a bar with no data in it (not a client colour) */
+#define C_BAR_NODATA RGB(235, 238, 245)   /* a bar with no data in it: white, not a client colour */
 #define C_DOWN  RGB(0, 200, 255)
 #define C_UP    RGB(255, 150, 30)
 
@@ -809,7 +809,7 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 		tot += v;
 	}
 	if (others > 0) { vals[k] = others; cols[k] = bar_color(C_OTHER); k++; }
-	lcd_rrect(l, x, y, w, h, 3, k ? C_TRACK : C_TRACK_EMPTY);
+	lcd_rrect(l, x, y, w, h, 3, k ? C_TRACK : C_BAR_NODATA);
 	double acc = 0;
 	for (int i = 0; i < k && tot > 0; i++) {
 		int x0 = x + (int)(acc / tot * w + 0.5);
@@ -822,7 +822,7 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 		for (int j = 0; j < th; j++) {
 			int bw = dir ? tw2 - j * tw2 / th : 2 + j * tw2 / th;
 			if (bw < 1) bw = 1;
-			lcd_fill(l, x + 3 + (tw2 - bw) / 2, y + (h - th) / 2 + j, bw, 1, k ? RGB(10, 12, 16) : C_DIM);
+			lcd_fill(l, x + 3 + (tw2 - bw) / 2, y + (h - th) / 2 + j, bw, 1, RGB(10, 12, 16));
 		}
 	}
 	if (showval && t->valid && h >= 12) {          /* the direction's total speed, dark on the segments */
@@ -830,7 +830,7 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 		const char *unit;
 		fmt_rate(dir ? t->down : t->up, num, sizeof(num), &unit);
 		snprintf(val, sizeof(val), "%s %s", num, unit);
-		lcd_draw(l, &FONT_T12, x + 15, y + (h - FONT_T12.h) / 2, val, k ? RGB(10, 12, 16) : C_DIM, LCD_TRANSPARENT, 1);
+		lcd_draw(l, &FONT_T12, x + 15, y + (h - FONT_T12.h) / 2, val, RGB(10, 12, 16), LCD_TRANSPARENT, 1);
 	}
 }
 
