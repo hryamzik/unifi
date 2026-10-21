@@ -12,7 +12,7 @@
 
 var PREVIEW = '/usr/libexec/utr-lcd/luci-preview';
 var STATUS = '/usr/libexec/utr-lcd/luci-status';
-var SCALE = 2;
+var SCALE = 1;   /* 1:1 - the real panel is tiny, a bigger picture would mislead */
 
 /* ---- model (pure functions, kept free of the DOM so they can be tested) ---- */
 
@@ -259,7 +259,7 @@ return view.extend({
 			return E('tr', {}, [
 				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
 					w[0] = v; w[1] = TYPES[v].def; redraw();
-				}, { 'style': 'min-width:11em' })),
+				}, { 'style': 'width:100%; max-width:13em' })),
 				E('td', {}, t.sizes ? select(t.sizes.map(function(s) { return [ s, sizeLabel(t, s) ]; }), w[1], function(v) {
 					w[1] = +v; redraw();
 				}) : E('span', { 'style': 'opacity:.6' }, '-')),
@@ -321,17 +321,17 @@ return view.extend({
 						if (screens.length > 1 && confirm(_('Remove this screen?'))) { screens.splice(si, 1); redraw(); }
 					}, screens.length <= 1)
 				]),
-				E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:20px' }, [
-					E('div', { 'style': 'flex:1; min-width:320px' }, [
-						sc.widgets.length ? E('table', { 'class': 'table' }, [
+				E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start' }, [
+					E('div', { 'style': 'flex:1 1 300px; min-width:0' }, [
+						sc.widgets.length ? E('div', { 'style': 'overflow-x:auto' }, E('table', { 'class': 'table', 'style': 'width:100%' }, [
 							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
-						].concat(sc.widgets.map(function(_w, wi) { return widgetRow(sc, wi); }))) : E('em', {}, _('Nothing on this screen yet.')),
+						].concat(sc.widgets.map(function(_w, wi) { return widgetRow(sc, wi); })))) : E('em', {}, _('Nothing on this screen yet.')),
 						E('div', { 'style': 'margin-top:8px' }, addSel),
 						meter,
 						sc.backfill ? E('small', { 'style': 'opacity:.7; display:block; margin-top:4px' },
 							_('The signal background colours the screen from the bottom by the Wi-Fi signal (red when poor, green when full). It is only used for Wi-Fi uplinks; with several Wi-Fi uplinks the screen is split horizontally between them.')) : ''
 					]),
-					E('div', {}, [ canvas, note ])
+					E('div', { 'style': 'flex:none' }, [ canvas, note ])
 				])
 			]);
 		}
@@ -363,7 +363,7 @@ return view.extend({
 					select([ [ 'none', _('As is') ], [ 'weak', _('What if: weak Wi-Fi') ], [ 'ethernet', _('What if: wired uplink') ], [ 'nouplink', _('What if: no uplink') ],
 						[ 'nointernet', _('What if: no internet') ], [ 'vpnup', _('What if: VPN connected') ], [ 'vpndown', _('What if: VPN down') ], [ 'novpn', _('What if: no VPN') ] ],
 						preview.scenario, function(v) { preview.scenario = v; schedulePreview(); }),
-					E('small', { 'style': 'opacity:.7' }, _('The preview is drawn by the router itself with the settings on this page, saved or not. Grey-red areas are hidden by the bezel.'))
+					E('small', { 'style': 'opacity:.7' }, _('The preview is drawn by the router itself with the settings on this page, saved or not. Dark grey areas are hidden by the bezel.'))
 				])
 			]);
 		}

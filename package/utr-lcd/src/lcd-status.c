@@ -755,7 +755,8 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 	}
 }
 
-/* One speed line: arrow, number, unit. */
+/* One speed line: arrow, number, unit - the whole group centred in the span, the unit in
+ * the legend's value size (16) when that fits and 12 otherwise, bottoms aligned. */
 static void draw_speed_line(lcd_t *l, span_t sp, int y, int h, int size, int down, double bps, int valid)
 {
 	char num[16];
@@ -763,9 +764,14 @@ static void draw_speed_line(lcd_t *l, span_t sp, int y, int h, int size, int dow
 	const font_t *f = size >= 24 ? &FONT_T24B : &FONT_T16B;
 	if (valid) fmt_rate(bps, num, sizeof(num), &unit);
 	else { copy(num, sizeof(num), "--"); unit = ""; }
-	draw_tri(l, sp.x0, y + (h - 10) / 2, down, down ? C_DOWN : C_UP);
-	int x = lcd_draw(l, f, sp.x0 + 18, y + (h - f->h) / 2, num, C_WHITE, LCD_TRANSPARENT, 1);
-	lcd_draw(l, &FONT_T12, x + 4, y + (h + f->h) / 2 - 12 - 1, unit, C_DIM, LCD_TRANSPARENT, 1);
+	const font_t *uf = &FONT_T16;
+	int gw = 18 + lcd_text_w(f, num, 1) + 4 + lcd_text_w(uf, unit, 1);
+	if (gw > sp.x1 + 1 - sp.x0) { uf = &FONT_T12; gw = 18 + lcd_text_w(f, num, 1) + 4 + lcd_text_w(uf, unit, 1); }
+	int x0 = sp.x0 + (sp.x1 + 1 - sp.x0 - gw) / 2;
+	if (x0 < sp.x0) x0 = sp.x0;
+	draw_tri(l, x0, y + (h - 10) / 2, down, down ? C_DOWN : C_UP);
+	int x = lcd_draw(l, f, x0 + 18, y + (h - f->h) / 2, num, C_WHITE, LCD_TRANSPARENT, 1);
+	lcd_draw(l, uf, x + 4, y + (h + f->h) / 2 - uf->h - 1, unit, C_DIM, LCD_TRANSPARENT, 1);
 }
 
 /* Resource row: label, bar (green, amber above 60 %, red above 85 %), value. */
@@ -1002,8 +1008,9 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 	lcd_flush(l);
 }
 
-/* Print the picture as the viewer sees it, bezel-hidden pixels tinted, as run-length text for the LuCI
- * preview: "W H" then "count:rrggbb" runs in row-major order, all on one line each. */
+/* Print the picture as the viewer sees it, bezel-hidden pixels in a flat neutral dark grey (the
+ * rounded panel silhouette without a coloured frame), as run-length text for the LuCI preview:
+ * "W H" then "count:rrggbb" runs in row-major order, all on one line each. */
 static void write_rle(lcd_t *l, const win_t *w)
 {
 	printf("%d %d\n", l->w, l->h);
@@ -1018,10 +1025,7 @@ static void write_rle(lcd_t *l, const win_t *w)
 				int ci = corner_inset(w, y);
 				if (x < w->x0 + ci || x > w->x1 - ci) in = 0;
 			}
-			if (!in) {
-				int r = c >> 16 & 255, g = c >> 8 & 255, b = c & 255;
-				c = (r || g || b) ? RGB(90 + r / 8, 20 + g / 8, 20 + b / 8) : RGB(70, 70, 78);
-			}
+			if (!in) c = RGB(26, 26, 30);
 			if (run && c == cur) { run++; continue; }
 			if (run) printf("%d:%06x ", run, (unsigned)cur);
 			cur = c; run = 1;

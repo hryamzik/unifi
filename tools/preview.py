@@ -40,8 +40,7 @@ def load(src):
         for y in range(h):
             for x in range(w):
                 if not visible(x, y):
-                    r, g, b = img[y][x]
-                    img[y][x] = (90 + r // 8, 20 + g // 8, 20 + b // 8) if (r or g or b) else (70, 70, 78)
+                    img[y][x] = (26, 26, 30)   # flat neutral bezel, no coloured frame
     if rot == 180:
         img = [row[::-1] for row in img[::-1]]
     return w, h, img
