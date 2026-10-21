@@ -10,7 +10,9 @@ RUN=${UTR_RUN:-/var/run/utr-lcd}
 L=$STOCK/lib
 
 mkdir -p "$RUN"
-export FBSHIM_FILE=$RUN/fb0.raw FBSHIM_WIRELESS=$RUN/wireless FBSHIM_LOG=$RUN/shim.log
+# FBSHIM_CONF: the UI only applies settings (theme, brightness) after saving them to
+# /etc/ulcmd/ulcmd.conf, which does not exist on OpenWrt; keep that file in RAM instead.
+export FBSHIM_FILE=$RUN/fb0.raw FBSHIM_WIRELESS=$RUN/wireless FBSHIM_LOG=$RUN/shim.log FBSHIM_CONF=$RUN/ulcmd.conf
 export LD_PRELOAD=/usr/lib/utr-lcd/utr-lcd-fbshim.so
 
 # wait for the private ubus daemon

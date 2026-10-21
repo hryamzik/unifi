@@ -4,6 +4,8 @@
  *  - fakes /dev/fb0 as a 135x240 RGB565 buffer backed by $FBSHIM_FILE (default /tmp/fb0.raw)
  *  - redirects /proc/net/wireless to $FBSHIM_WIRELESS if that file exists (lets a feeder present
  *    a stock-style "ath4" interface with the real signal level)
+ *  - redirects the UI's settings file /etc/ulcmd/ulcmd.conf to $FBSHIM_CONF (RAM), so the UI can
+ *    save and apply its settings (theme, brightness, ...) without writing to the router's flash
  *  - SAFETY: refuses system()/popen(): logs the command to $FBSHIM_LOG and fails, so the UI can
  *    never run poweroff / reboot / anything else on the host.
  */
@@ -42,6 +44,10 @@ static const char *map_path(const char *path)
 	if (!strcmp(path, "/proc/net/wireless")) {
 		const char *w = getenv("FBSHIM_WIRELESS");
 		if (w && access(w, R_OK) == 0) { snprintf(buf, sizeof buf, "%s", w); return buf; }
+	}
+	if (!strcmp(path, "/etc/ulcmd/ulcmd.conf")) {
+		const char *c = getenv("FBSHIM_CONF");
+		if (c) { snprintf(buf, sizeof buf, "%s", c); return buf; }
 	}
 	return path;
 }
