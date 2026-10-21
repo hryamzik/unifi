@@ -526,7 +526,7 @@ static void conf_line(config_t *c, char *line)
 					specs[n].size = size > 0 ? size : WTYPES[t].def_size;
 					specs[n].wrap = colon && strchr(colon, 'w') ? 1 : 0;   /* e.g. ssid:24w wraps to 2 lines */
 					specs[n].shrink = colon && strchr(colon, 's') ? 1 : 0;   /* ssid:24ws: then step the font down until it fits */
-					specs[n].cores = colon && strchr(colon, 'c') ? 1 : 0;   /* cpu:16c: bar split per core */
+					specs[n].cores = colon && strchr(colon, 'r') ? 2 : colon && strchr(colon, 'c') ? 1 : 0;   /* cpu:16c per-core segments, cpu:16r per-core rows */
 					specs[n].layout = colon && strchr(colon, 'l') ? 1 : 0;   /* uplinks:24l: icon beside the label, not above */
 					specs[n].generic = colon && strchr(colon, 'g') ? 1 : 0;   /* uplinks:24g: label is WiFi/Eth, not the network name */
 					specs[n].noname = colon && strchr(colon, 'n') ? 1 : 0;   /* uplinks:24n: no labels, icons only */
@@ -944,7 +944,7 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 			else ellipsize(nf, c->name, room, 0, nm, sizeof(nm));
 			if (bgmode && bgmax > 0) {                /* background bar: this client's share of the widest */
 				int bw = (sp.x1 + 1 - sp.x0) * (int)(client_val(c, bgmode) * 100 / bgmax) / 100;
-				if (bw > 0) lcd_fill(l, sp.x0, y, bw, pitch - 1, dim_color(PALETTE[c->color], 34));
+				if (bw > 0) lcd_fill(l, sp.x0, y, bw, pitch - 1, dim_color(PALETTE[c->color], 50));
 			}
 			if ((bg == 3 || bg == 4 || bg == 5) && c->has_signal) {   /* signal: 1 px line, length and colour = quality */
 				int sq = sig_pct(c->signal);
@@ -1018,6 +1018,28 @@ static void draw_speed1(lcd_t *l, span_t sp, int y, int h, const traffic_t *t)
 
 /* Label, horizontal bar, value - the resource-row look. The label column fits the widest
  * label ("Signal") so bars align when such rows are stacked. */
+/* Per-core rows: the bar area is split into one full-width strip per core (1 px gaps),
+ * each strip filling with that core's utilisation; aggregate % stays on the right. */
+static void draw_core_rows(lcd_t *l, span_t sp, int y, int h, int size, const res_t *r)
+{
+	const font_t *lf = size >= 16 ? &FONT_T16 : &FONT_T12, *vf = size >= 16 ? &FONT_T16B : &FONT_T12;
+	char val[8];
+	snprintf(val, sizeof(val), "%d%%", r->cpu);
+	int lw = lcd_text_w(lf, "Signal", 1) + 4, vw = lcd_text_w(vf, val, 1), bw = sp.x1 + 1 - sp.x0 - lw - vw - 6;
+	lcd_draw(l, lf, sp.x0, y + (h - lf->h) / 2, "CPU", C_DIM, LCD_TRANSPARENT, 1);
+	if (bw >= 24 && r->ncores > 0) {
+		int n = r->ncores, ah = size, sh = (ah - (n - 1)) / n;
+		if (sh < 2) sh = 2;
+		int by = y + (h - (sh * n + (n - 1))) / 2;
+		for (int i = 0; i < n; i++) {
+			int pct = r->core[i] > 100 ? 100 : r->core[i];
+			lcd_fill(l, sp.x0 + lw, by + i * (sh + 1), bw, sh, C_TRACK);
+			if (bw * pct / 100 >= 2) lcd_fill(l, sp.x0 + lw, by + i * (sh + 1), bw * pct / 100, sh, pct < 50 ? C_OK : pct < 80 ? C_WARN : C_BAD);
+		}
+	}
+	lcd_draw(l, vf, sp.x1 + 1 - vw, y + (h - vf->h) / 2, val, C_WHITE, LCD_TRANSPARENT, 1);
+}
+
 static void draw_bar_row(lcd_t *l, span_t sp, int y, int h, int size, const char *label, int pct, const char *val, uint32_t fillc)
 {
 	/* size < 16 means the small row text (also chosen for a whole screen when its rows had to shrink) */
@@ -1275,8 +1297,6 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 			if (!noicon) {
 				if (v[i].wifi) draw_fan(l, cx, ry + size, fs, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
 				else draw_port(l, cx, ry, size, col);
-				if (v[i].state == UV_OFF)
-					for (int k = -size / 3; k <= size / 3; k++) lcd_fill(l, cx + k, ry + size / 2 - k, 2, 2, col);
 			}
 			if (!noname) {
 				/* the fan sits low in its row (dot at the bottom): centre the label on it, not on the row */
@@ -1288,8 +1308,6 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 			if (!noicon) {
 				if (v[i].wifi) draw_fan(l, cx, y + size, fs, v[i].has_signal ? sig_pct(v[i].signal) : 100, col, C_TRACK, 0);
 				else draw_port(l, cx, y, size, col);
-				if (v[i].state == UV_OFF)
-					for (int k = -size / 3; k <= size / 3; k++) lcd_fill(l, cx + k, y + size / 2 - k, 2, 2, col);
 			}
 			if (!noname) {
 				ellipsize(&FONT_T12, lab, cw - 2, 0, out, sizeof(out));
@@ -1600,17 +1618,19 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 	case W_MULTIWAN: draw_multiwan(l, w, s, c->tr, wd->size, y); break;
 	case W_UPLINKS: draw_uplinks(l, sp, y, wd->size, s, c->tr, wd->layout, wd->generic, wd->noname, wd->noicon); break;
 	case W_CPU:
-		if (wd->cores && c->res->ncores > 0) draw_core_bar(l, sp, y, h, c->row_step ? 12 : wd->size, c->res);
+		if (wd->cores == 2 && c->res->ncores > 0) draw_core_rows(l, sp, y, h, c->row_step ? 12 : wd->size, c->res);
+		else if (wd->cores == 1 && c->res->ncores > 0) draw_core_bar(l, sp, y, h, c->row_step ? 12 : wd->size, c->res);
 		else draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "CPU", c->res->cpu, C_TRACK);
 		break;
 	case W_LOAD: {
 		/* Background bar behind the row (like the legend's), width = load vs all cores;
 		 * "LA" and the 1/5/15 triple (16 px) or 1-minute value (12 px) on top of it. */
-		int nc = c->res->ncores > 0 ? c->res->ncores : 4, pct = c->res->load[0] / nc, sz = c->row_step ? 12 : wd->size;
+		int nc = c->res->ncores > 0 ? c->res->ncores : 4, pct = c->res->load[0] / nc;
 		char val[48];
 		const font_t *lf = &FONT_T12, *vf = &FONT_T12;
-		if (sz >= 16) snprintf(val, sizeof(val), "%d.%02d %d.%02d %d.%02d", c->res->load[0] / 100, c->res->load[0] % 100, c->res->load[1] / 100, c->res->load[1] % 100, c->res->load[2] / 100, c->res->load[2] % 100);
+		if (wd->size >= 16) snprintf(val, sizeof(val), "%d.%02d %d.%02d %d.%02d", c->res->load[0] / 100, c->res->load[0] % 100, c->res->load[1] / 100, c->res->load[1] % 100, c->res->load[2] / 100, c->res->load[2] % 100);
 		else snprintf(val, sizeof(val), "%d.%02d", c->res->load[0] / 100, c->res->load[0] % 100);
+		if (lcd_text_w(vf, val, 1) > sp.x1 - sp.x0 - 16) snprintf(val, sizeof(val), "%d.%02d", c->res->load[0] / 100, c->res->load[0] % 100);   /* no room for the triple */
 		uint32_t col = pct < 60 ? C_OK : pct < 85 ? C_WARN : C_BAD;
 		int bw = (sp.x1 + 1 - sp.x0) * (pct > 100 ? 100 : pct) / 100;
 		if (bw > 0) lcd_fill(l, sp.x0, y + 1, bw, h - 2, dim_color(col, 34));
@@ -1646,9 +1666,6 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 			lcd_fill(l, cx - 1, cy - 4, 3, 6, C_BG);
 			lcd_fill(l, cx - 1, cy + 3, 3, 3, C_BG);
 		}
-		if (!ready && !noint)                                     /* slash across the globe */
-			for (int i = -r - 3; i <= r + 3; i++)
-				lcd_fill(l, cx + i, cy - i - 1, 3, 3, col);
 		break;
 	}
 	}

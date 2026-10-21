@@ -125,12 +125,12 @@ function parseWidget(str) {
 	/* [type, size, join, wrap, shrink, bg, fit, cores, inline, generic, noname, noicon, showval] - flags
 	 * after the size: w wrap, s shrink (ssid), b0..b5 legend bg, f/F fit, c per-core, l/g/n/i uplinks, v speed value */
 	return [p[0], size, false, /w/.test(o), /s/.test(o), bg ? +bg[1] : 0, /F/.test(o) ? 2 : /f/.test(o) ? 1 : 0,
-		/c/.test(o), /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o), /v/.test(o)];
+		/r/.test(o) ? 2 : /c/.test(o) ? 1 : 0, /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o), /v/.test(o)];
 }
 
 function widgetSpec(w) {
-	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '') + (w[7] ? 'c' : '') +
-		(w[5] ? 'b' + w[5] : '') + (w[6] === 2 ? 'F' : w[6] === 1 ? 'f' : '') + (w[8] ? 'l' : '') + (w[9] ? 'g' : '') +
+	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '') +
+		(w[5] ? 'b' + w[5] : '') + (w[6] === 2 ? 'F' : w[6] === 1 ? 'f' : '') + (w[7] === 2 ? 'r' : w[7] ? 'c' : '') + (w[8] ? 'l' : '') + (w[9] ? 'g' : '') +
 		(w[10] ? 'n' : '') + (w[11] ? 'i' : '') + (w[12] ? 'v' : '');
 }
 
@@ -322,7 +322,7 @@ return view.extend({
 					select([ [ '0', _('Fit: off') ], [ '1', _('Fit: gentle') ], [ '2', _('Fit: compact') ] ], w[6] || 0, function(v) { w[6] = +v; redraw(); }, { 'style': 'width:100%; max-width:9em; margin-top:2px' })
 				]);
 			if (w[0] === 'cpu')
-				return E('td', {}, check(!!w[7], function(v) { w[7] = v; redraw(); }, _('Per-core bar')));
+				return E('td', {}, select([ [ '0', _('Bar: total') ], [ '1', _('Bar: per-core segments') ], [ '2', _('Bar: per-core rows') ] ], w[7] || 0, function(v) { w[7] = +v; redraw(); }, { 'style': 'width:100%; max-width:11em' }));
 			if (w[0] === 'uplinks')
 				return E('td', {}, [
 					check(!!w[8], function(v) { w[8] = v; redraw(); }, _('Icon beside name')),
@@ -340,7 +340,7 @@ return view.extend({
 			var joinFull = !w[2] && groupSize(sc.widgets, wi) >= 3;
 			return E('tr', {}, [
 				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
-					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = false; w[8] = false; w[9] = false; w[10] = false; w[11] = false; w[12] = false; redraw();
+					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = 0; w[8] = false; w[9] = false; w[10] = false; w[11] = false; w[12] = false; redraw();
 				}, { 'style': 'width:100%; max-width:13em' })),
 				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
 					'checked': w[2] ? '' : null, 'disabled': (wi === sc.widgets.length - 1 || joinFull) ? '' : null,
