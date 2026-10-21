@@ -339,9 +339,9 @@ static void res_sample(res_t *r, cpu_prev_t *cp)
 
 /* ---------------------------------------------------------------------------------- configuration */
 
-enum { W_SSID, W_DBM, W_BARS, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
+enum { W_SSID, W_DBM, W_BARS, W_DOT, W_CLIENTS, W_WANIP, W_LANIP, W_VPN, W_UPTIME, W_RULE,
        W_SPEED, W_SPEEDBAR, W_USAGE, W_USAGEBAR, W_LEGEND, W_LEGENDTOTAL, W_DONUT,
-       W_CPU, W_RAM, W_FLASH, W_TEMP, W_MULTIWAN, W_NTYPES };
+       W_CPU, W_RAM, W_FLASH, W_TEMP, W_MULTIWAN, W_ROW, W_NTYPES };
 enum { ST_DOT, ST_PILL, ST_NONE };
 
 typedef struct { const char *name; int def_size; } wtype_t;
@@ -349,6 +349,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_SSID]    = { "ssid", 24 },
 	[W_DBM]     = { "dbm", 32 },
 	[W_BARS]    = { "bars", 24 },           /* Wi-Fi signal as 5 ascending bars (Wi-Fi only); size = tallest bar */
+	[W_DOT]     = { "dot", 16 },            /* online status as a dot, like the screen indicator but placeable */
+	[W_ROW]     = { "row", 0 },             /* sub-widgets side by side on one line (a+b+c in the config) */
 	[W_CLIENTS] = { "clients", 24 },
 	[W_WANIP]   = { "wanip", 16 },
 	[W_LANIP]   = { "lanip", 16 },
@@ -373,7 +375,9 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_SCREENS 12
 #define MAX_PLAYLIST 32
 
-typedef struct { int type, size; } widget_t;
+#define MAX_SUB 3
+typedef struct { int type, size; } wspec_t;
+typedef struct { int type, size; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill;
@@ -432,16 +436,31 @@ static void conf_line(config_t *c, char *line)
 	else if (!strcmp(line, "indicator")) s->indicator = !strcmp(eq, "pill") ? ST_PILL : !strcmp(eq, "none") ? ST_NONE : ST_DOT;
 	else if (!strcmp(line, "backfill")) s->backfill = atoi(eq) != 0;
 	else if (!strcmp(line, "widget") && s->nw < MAX_WIDGETS) {
-		char *colon = strchr(eq, ':');
-		int size = 0;
-		if (colon) { *colon++ = 0; size = atoi(colon); }
-		for (int t = 0; t < W_NTYPES; t++)
-			if (!strcmp(eq, WTYPES[t].name)) {
-				s->w[s->nw].type = t;
-				s->w[s->nw].size = size > 0 ? size : WTYPES[t].def_size;
-				s->nw++;
-				break;
-			}
+		/* one widget, or several joined by '+' to share one line (at most MAX_SUB) */
+		wspec_t specs[MAX_SUB + 1];
+		int n = 0;
+		for (char *tok = strtok(eq, "+"); tok && n <= MAX_SUB; tok = strtok(NULL, "+")) {
+			char *colon = strchr(tok, ':');
+			int size = 0;
+			if (colon) { *colon++ = 0; size = atoi(colon); }
+			for (int t = 0; t < W_NTYPES; t++)
+				if (!strcmp(tok, WTYPES[t].name) && t != W_ROW) {
+					specs[n].type = t;
+					specs[n].size = size > 0 ? size : WTYPES[t].def_size;
+					n++;
+					break;
+				}
+		}
+		if (n == 1) {
+			s->w[s->nw].type = specs[0].type;
+			s->w[s->nw].size = specs[0].size;
+			s->nw++;
+		} else if (n > 1) {
+			widget_t *wd = &s->w[s->nw++];
+			wd->type = W_ROW;
+			wd->nsub = n;
+			for (int i = 0; i < n; i++) wd->sub[i] = specs[i];
+		}
 	}
 }
 
@@ -579,11 +598,13 @@ static const font_t *fit_font(int start, const char *s, int maxw)
 
 static void text_centered(lcd_t *l, const win_t *w, span_t sp, int y, int h, int size, const char *s, uint32_t c, int middle)
 {
+	(void)w;
 	char buf[64];
-	int half = sp.x1 - w->cx < w->cx - sp.x0 ? sp.x1 - w->cx : w->cx - sp.x0, maxw = 2 * half + 1;
+	int cx = (sp.x0 + sp.x1 + 1) / 2;          /* centred in the span (a cell of a shared line, or the screen) */
+	int half = sp.x1 - cx < cx - sp.x0 ? sp.x1 - cx : cx - sp.x0, maxw = 2 * half + 1;
 	const font_t *f = fit_font(ladder_index(size), s, maxw);
 	ellipsize(f, s, maxw, middle, buf, sizeof(buf));
-	lcd_draw(l, f, w->cx - lcd_text_w(f, buf, 1) / 2, y + (h - f->h) / 2, buf, c, LCD_TRANSPARENT, 1);
+	lcd_draw(l, f, cx - lcd_text_w(f, buf, 1) / 2, y + (h - f->h) / 2, buf, c, LCD_TRANSPARENT, 1);
 }
 
 /* Label on the left, value on the right. Text steps down from 8x16 to 6x12 before the value is cut;
@@ -853,7 +874,17 @@ typedef struct { const status_t *s; const traffic_t *tr; const res_t *res; const
 /* Height a widget needs; 0 = nothing to show right now (it takes no room). */
 static int widget_h(const widget_t *wd, const ctx_t *c)
 {
+	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
+		int m = 0;
+		for (int i = 0; i < wd->nsub; i++) {
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size };
+			int hh = widget_h(&t, c);
+			if (hh > m) m = hh;
+		}
+		return m;
+	}
 	switch (wd->type) {
+	case W_DOT: return wd->size + PAD;
 	case W_DBM: {
 		int wifi = c->s->has_signal && !strcmp(c->s->up_type, "wifi");
 		return !strcmp(c->s->up_state, "up") && (wifi || c->s->speed > 0) ? wd->size + PAD : 0;
@@ -874,12 +905,29 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	}
 }
 
-static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, int y, int h)
+static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, int y, int h);
+
+static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, int y, int h, span_t sp)
 {
 	const status_t *s = c->s;
 	int up = !strcmp(s->up_state, "up"), wifi = !strcmp(s->up_type, "wifi");
-	span_t sp = span_for(w, y, h);
 	char buf[64];
+
+	if (wd->type == W_ROW) {
+		/* visible members get equal cells of the span, each drawn centred in its cell */
+		int vis[MAX_SUB], nv = 0;
+		for (int i = 0; i < wd->nsub; i++) {
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size };
+			if (widget_h(&t, c)) vis[nv++] = i;
+		}
+		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
+		for (int k = 0; k < nv; k++) {
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size };
+			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
+			widget_draw_sp(l, w, &t, c, y, h, cell);
+		}
+		return;
+	}
 
 	switch (wd->type) {
 	case W_SSID:
@@ -901,7 +949,7 @@ static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, 
 		/* 5 ascending bars, lit by signal quality (same scale as the backfill) */
 		int p = sig_pct(s->signal), nb = 5, lit = p <= 0 ? 0 : (p * nb + 99) / 100;
 		uint32_t col = c->backfill ? C_WHITE : p >= 50 ? C_OK : p >= 25 ? C_WARN : C_BAD;
-		int bw = wd->size >= 24 ? 6 : 4, bg = 3, bx = w->cx - (nb * bw + (nb - 1) * bg) / 2, base = y + (h + wd->size) / 2;
+		int bw = wd->size >= 24 ? 6 : 4, bg = 3, bx = (sp.x0 + sp.x1 + 1) / 2 - (nb * bw + (nb - 1) * bg) / 2, base = y + (h + wd->size) / 2;
 		for (int i = 0; i < nb; i++)
 			lcd_fill(l, bx + i * (bw + bg), base - wd->size * (i + 1) / nb, bw, wd->size * (i + 1) / nb, i < lit ? col : C_TRACK);
 		break;
@@ -910,7 +958,7 @@ static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, 
 		const font_t *f = LADDER[ladder_index(wd->size)];
 		int sc = wd->size >= 32 ? 2 : 1, iw = 16 * sc;
 		snprintf(buf, sizeof(buf), "%d", s->clients);
-		int tw = lcd_text_w(f, buf, 1), x = w->cx - (iw + 6 + tw) / 2;
+		int tw = lcd_text_w(f, buf, 1), x = (sp.x0 + sp.x1 + 1) / 2 - (iw + 6 + tw) / 2;
 		draw_icon(l, x, y + (h - iw) / 2, ICON_USER, C_WHITE, sc);
 		lcd_draw(l, f, x + iw + 6, y + (h - f->h) / 2, buf, C_WHITE, LCD_TRANSPARENT, 1);
 		break;
@@ -947,7 +995,7 @@ static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, 
 		break;
 	case W_LEGEND: draw_legend(l, w, c->tr, 0, wd->size, y, c->name_len); break;
 	case W_LEGENDTOTAL: draw_legend(l, w, c->tr, 1, wd->size, y, c->name_len); break;
-	case W_DONUT: draw_donut(l, c->tr, w->cx, y + h / 2, (wd->size - 2) / 2); break;
+	case W_DONUT: draw_donut(l, c->tr, (sp.x0 + sp.x1 + 1) / 2, y + h / 2, (wd->size - 2) / 2); break;
 	case W_MULTIWAN: draw_multiwan(l, w, s, c->tr, wd->size, y); break;
 	case W_CPU: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "CPU", c->res->cpu, C_TRACK); break;
 	case W_RAM: draw_resource(l, sp, y, h, c->row_step ? 12 : wd->size, "RAM", c->res->ram, C_TRACK); break;
@@ -960,7 +1008,17 @@ static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, 
 		lcd_draw(l, vf, sp.x1 + 1 - lcd_text_w(vf, buf, 1), y + (h - vf->h) / 2, buf, c->res->temp >= 85 ? C_BAD : c->res->temp >= 75 ? C_WARN : C_WHITE, LCD_TRANSPARENT, 1);
 		break;
 	}
+	case W_DOT: {
+		uint32_t col = !strcmp(c->state, "ready") ? C_OK : !strcmp(c->state, "noInternet") ? C_WARN : C_BAD;
+		lcd_disc(l, (sp.x0 + sp.x1 + 1) / 2, y + h / 2, wd->size / 2, col);
+		break;
 	}
+	}
+}
+
+static void widget_draw(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *c, int y, int h)
+{
+	widget_draw_sp(l, w, wd, c, y, h, span_for(w, y, h));
 }
 
 /* ----------------------------------------------------------------------------------------- screen */
@@ -1009,6 +1067,14 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 	for (int i = 0; i < sc->nw; i++) {        /* measure: all rows of a screen share one text size */
 		int t = sc->w[i].type;
 		if (hs[i] && (t == W_WANIP || t == W_LANIP || t == W_VPN || t == W_UPTIME || t == W_USAGE)) widget_draw(NULL, w, &sc->w[i], &c, top, hs[i]);
+		if (hs[i] && t == W_ROW)              /* row members with row text measure the same way */
+			for (int j = 0; j < sc->w[i].nsub; j++) {
+				int st = sc->w[i].sub[j].type;
+				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size };
+					widget_draw(NULL, w, &mt, &c, top, hs[i]);
+				}
+			}
 	}
 	if (nvis) {
 		int spare = bottom - top - total, gap;
@@ -1058,17 +1124,26 @@ static void write_rle(lcd_t *l, const win_t *w)
 	printf("\n");
 }
 
+static int type_uses_traffic(int t) { return (t >= W_SPEED && t <= W_DONUT) || t == W_MULTIWAN; }
+static int type_uses_res(int t) { return t >= W_CPU && t <= W_TEMP; }
+
 static int screen_uses_traffic(const screen_t *sc)
 {
-	for (int i = 0; i < sc->nw; i++)
-		if ((sc->w[i].type >= W_SPEED && sc->w[i].type <= W_DONUT) || sc->w[i].type == W_MULTIWAN) return 1;
+	for (int i = 0; i < sc->nw; i++) {
+		if (type_uses_traffic(sc->w[i].type)) return 1;
+		if (sc->w[i].type == W_ROW)
+			for (int j = 0; j < sc->w[i].nsub; j++) if (type_uses_traffic(sc->w[i].sub[j].type)) return 1;
+	}
 	return 0;
 }
 
 static int screen_uses_res(const screen_t *sc)
 {
-	for (int i = 0; i < sc->nw; i++)
-		if (sc->w[i].type >= W_CPU && sc->w[i].type <= W_TEMP) return 1;
+	for (int i = 0; i < sc->nw; i++) {
+		if (type_uses_res(sc->w[i].type)) return 1;
+		if (sc->w[i].type == W_ROW)
+			for (int j = 0; j < sc->w[i].nsub; j++) if (type_uses_res(sc->w[i].sub[j].type)) return 1;
+	}
 	return 0;
 }
 
