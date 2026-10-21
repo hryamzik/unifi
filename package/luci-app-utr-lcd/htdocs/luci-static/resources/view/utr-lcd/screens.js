@@ -81,13 +81,14 @@ function widgetHeight(type, size, wrap, w) {
 	case 'legend':
 	case 'legendtotal': return size * ROW;
 	case 'multiwan': return 2 * ((size >= 16 ? 16 : 12) + 2 + (size >= 16 ? 8 : 6) + 4);
+	case 'speedbar': case 'speeddn': case 'speedup': case 'usagebar': case 'usagedn': case 'usageup': return size + 1;   /* bars pack tighter */
 	default: return size + 2;
 	}
 }
 
 /* Room for widgets (content now starts at the top margin; the status is a widget). */
 function availableHeight() {
-	return 233 - 6;
+	return 233 - 4;
 }
 
 /* Heights of the lines: widgets joined with the next one share a line (its height is the max). */
@@ -121,16 +122,16 @@ function parseWidget(str) {
 	var size = parseInt(p[1], 10);
 	if (!size || (t.sizes && t.sizes.indexOf(size) < 0)) size = t.def;
 	var o = p[1] || '', bg = /b([0-5])/.exec(o);
-	/* [type, size, join, wrap, shrink, bg, fit, cores, inline, generic, noname, noicon] - flags after
-	 * the size: w wrap, s shrink (ssid), b0..b5 legend bg, f/F legend fit, c per-core (cpu), l/g/n/i uplinks */
+	/* [type, size, join, wrap, shrink, bg, fit, cores, inline, generic, noname, noicon, showval] - flags
+	 * after the size: w wrap, s shrink (ssid), b0..b5 legend bg, f/F fit, c per-core, l/g/n/i uplinks, v speed value */
 	return [p[0], size, false, /w/.test(o), /s/.test(o), bg ? +bg[1] : 0, /F/.test(o) ? 2 : /f/.test(o) ? 1 : 0,
-		/c/.test(o), /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o)];
+		/c/.test(o), /l/.test(o), /g/.test(o), /n/.test(o), /i/.test(o), /v/.test(o)];
 }
 
 function widgetSpec(w) {
 	return w[0] + ':' + w[1] + (w[3] ? 'w' : '') + (w[4] ? 's' : '') + (w[7] ? 'c' : '') +
 		(w[5] ? 'b' + w[5] : '') + (w[6] === 2 ? 'F' : w[6] === 1 ? 'f' : '') + (w[8] ? 'l' : '') + (w[9] ? 'g' : '') +
-		(w[10] ? 'n' : '') + (w[11] ? 'i' : '');
+		(w[10] ? 'n' : '') + (w[11] ? 'i' : '') + (w[12] ? 'v' : '');
 }
 
 /* One config item: "type:size" or several joined by '+' for one shared line. */
@@ -325,8 +326,12 @@ return view.extend({
 			if (w[0] === 'uplinks')
 				return E('td', {}, [
 					check(!!w[8], function(v) { w[8] = v; redraw(); }, _('Icon beside name')),
-					check(!!w[9], function(v) { w[9] = v; redraw(); }, _('Short names (WiFi/Eth)'))
+					check(!!w[9], function(v) { w[9] = v; redraw(); }, _('Short names (WiFi/Eth)')),
+					check(!!w[10], function(v) { w[10] = v; redraw(); }, _('No names')),
+					check(!!w[11], function(v) { w[11] = v; redraw(); }, _('No icons'))
 				]);
+			if (w[0] === 'speeddn' || w[0] === 'speedup')
+				return E('td', {}, check(!!w[12], function(v) { w[12] = v; redraw(); }, _('Show speed value')));
 			return E('td', {}, E('span', { 'style': 'opacity:.6' }, '-'));
 		}
 
@@ -335,7 +340,7 @@ return view.extend({
 			var joinFull = !w[2] && groupSize(sc.widgets, wi) >= 3;
 			return E('tr', {}, [
 				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
-					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = false; w[8] = false; w[9] = false; w[10] = false; w[11] = false; redraw();
+					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = false; w[8] = false; w[9] = false; w[10] = false; w[11] = false; w[12] = false; redraw();
 				}, { 'style': 'width:100%; max-width:13em' })),
 				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
 					'checked': w[2] ? '' : null, 'disabled': (wi === sc.widgets.length - 1 || joinFull) ? '' : null,
@@ -398,7 +403,7 @@ return view.extend({
 						redraw();
 					}, 50), ' ', _('s on screen') ]),
 					check(sc.enabled, function(v) { sc.enabled = v; redraw(); }, _('In rotation')),
-					select([ [ 'auto', _('Spacing: auto') ], [ '2', _('Spacing: 2 px') ], [ '4', _('Spacing: 4 px') ], [ '6', _('Spacing: 6 px') ], [ '8', _('Spacing: 8 px') ], [ '12', _('Spacing: 12 px') ], [ '18', _('Spacing: 18 px') ] ], sc.spacing, function(v) { sc.spacing = v; redraw(); }),
+					select([ [ 'auto', _('Spacing: auto') ], [ '1', _('Spacing: 1 px') ], [ '2', _('Spacing: 2 px') ], [ '4', _('Spacing: 4 px') ], [ '6', _('Spacing: 6 px') ], [ '8', _('Spacing: 8 px') ], [ '12', _('Spacing: 12 px') ], [ '18', _('Spacing: 18 px') ] ], sc.spacing, function(v) { sc.spacing = v; redraw(); }),
 					check(sc.backfill, function(v) { sc.backfill = v; redraw(); }, _('Signal background')),
 					btn('\u2191', function() { move(screens, si, -1); redraw(); }, si === 0, _('Move screen up')),
 					btn('\u2193', function() { move(screens, si, 1); redraw(); }, si === screens.length - 1, _('Move screen down')),

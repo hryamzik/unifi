@@ -451,8 +451,8 @@ static const wtype_t WTYPES[W_NTYPES] = {
 #define MAX_PLAYLIST 32
 
 #define MAX_SUB 3
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon; } wspec_t;   /* bg/fit: legend; cores: cpu; layout/generic/noname/noicon: uplinks */
-typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval; } wspec_t;   /* bg/fit: legend; cores: cpu; layout/generic/noname/noicon: uplinks */
+typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
 	int dwell_ms, enabled, indicator, backfill;
@@ -531,6 +531,7 @@ static void conf_line(config_t *c, char *line)
 					specs[n].generic = colon && strchr(colon, 'g') ? 1 : 0;   /* uplinks:24g: label is WiFi/Eth, not the network name */
 					specs[n].noname = colon && strchr(colon, 'n') ? 1 : 0;   /* uplinks:24n: no labels, icons only */
 					specs[n].noicon = colon && strchr(colon, 'i') ? 1 : 0;   /* uplinks:24i: no icons, labels only */
+					specs[n].showval = colon && strchr(colon, 'v') ? 1 : 0;   /* speeddn:12v: total speed written on the bar */
 					specs[n].fit = colon && strchr(colon, 'F') ? 2 : colon && strchr(colon, 'f') ? 1 : 0;   /* legend fit: f gentle, F compact */
 					if (colon) {   /* legend background: b0..b5 (none speed total signal signal+speed signal+total) */
 						const char *b = strchr(colon, 'b');
@@ -552,6 +553,7 @@ static void conf_line(config_t *c, char *line)
 			s->w[s->nw].generic = specs[0].generic;
 			s->w[s->nw].noname = specs[0].noname;
 			s->w[s->nw].noicon = specs[0].noicon;
+			s->w[s->nw].showval = specs[0].showval;
 			s->nw++;
 		} else if (n > 1) {
 			widget_t *wd = &s->w[s->nw++];
@@ -776,7 +778,7 @@ static void draw_tri(lcd_t *l, int x, int y, int down, uint32_t c)
 #define BAR_MAX 6
 
 /* Share bar: one segment per client in its colour (largest BAR_MAX, the rest grey), no text on it. */
-static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int y, int w, int h, int dir)
+static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int y, int w, int h, int dir, int showval)
 {
 	int idx[MAX_CL], n = traffic_rank_m(t, mode, idx), k = 0;
 	double vals[BAR_MAX + 1], tot = 0, others = 0;
@@ -790,14 +792,6 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 	}
 	if (others > 0) { vals[k] = others; cols[k] = C_OTHER; k++; }
 	lcd_rrect(l, x, y, w, h, 3, C_TRACK);
-	if (dir >= 0 && h >= 8) {          /* direction triangle at the left end, dark like the total bars */
-		int th = h >= 12 ? 7 : 5, tw2 = th + 2;
-		for (int j = 0; j < th; j++) {
-			int bw = dir ? tw2 - j * tw2 / th : 2 + j * tw2 / th;
-			if (bw < 1) bw = 1;
-			lcd_fill(l, x + 3 + (tw2 - bw) / 2, y + (h - th) / 2 + j, bw, 1, RGB(10, 12, 16));
-		}
-	}
 	double acc = 0;
 	for (int i = 0; i < k && tot > 0; i++) {
 		int x0 = x + (int)(acc / tot * w + 0.5);
@@ -805,17 +799,32 @@ static void draw_share_bar_m(lcd_t *l, const traffic_t *t, int mode, int x, int 
 		int x1 = x + (int)(acc / tot * w + 0.5);
 		if (x1 - x0 > 1) lcd_fill(l, x0 + (i ? 1 : 0), y + 1, x1 - x0 - (i ? 1 : 0), h - 2, cols[i]);
 	}
+	if (dir >= 0 && h >= 8) {          /* direction triangle at the left end, on top of the segments */
+		int th = h >= 12 ? 7 : 5, tw2 = th + 2;
+		for (int j = 0; j < th; j++) {
+			int bw = dir ? tw2 - j * tw2 / th : 2 + j * tw2 / th;
+			if (bw < 1) bw = 1;
+			lcd_fill(l, x + 3 + (tw2 - bw) / 2, y + (h - th) / 2 + j, bw, 1, RGB(10, 12, 16));
+		}
+	}
+	if (showval && t->valid && h >= 12) {          /* the direction's total speed, dark on the segments */
+		char num[16], val[24];
+		const char *unit;
+		fmt_rate(dir ? t->down : t->up, num, sizeof(num), &unit);
+		snprintf(val, sizeof(val), "%s %s", num, unit);
+		lcd_draw(l, &FONT_T12, x + 15, y + (h - FONT_T12.h) / 2, val, RGB(10, 12, 16), LCD_TRANSPARENT, 1);
+	}
 }
 
 static void draw_share_bar(lcd_t *l, const traffic_t *t, int by_total, int x, int y, int w, int h)
 {
-	draw_share_bar_m(l, t, by_total ? BM_TOTAL : BM_RATE, x, y, w, h, -1);
+	draw_share_bar_m(l, t, by_total ? BM_TOTAL : BM_RATE, x, y, w, h, -1, 0);
 }
 
 /* Directional total bar with the total written inside it (down or up bytes). */
 static void draw_total_bar(lcd_t *l, const traffic_t *t, int down, int x, int y, int w, int h)
 {
-	draw_share_bar_m(l, t, down ? BM_DTOTAL : BM_UTOTAL, x, y, w, h, -1);
+	draw_share_bar_m(l, t, down ? BM_DTOTAL : BM_UTOTAL, x, y, w, h, -1, 0);
 	if (!t->valid) return;
 	char val[24];
 	fmt_bytes(down ? t->dtot : t->utot, val, sizeof(val));
@@ -1070,13 +1079,15 @@ static void draw_globe(lcd_t *l, int cx, int cy, int r, uint32_t c)
  * every stroke is first drawn offset in dark colour (readable on the bright signal backfill). */
 static void draw_fan(lcd_t *l, int cx, int base, int size, int pct, uint32_t col, uint32_t dimc, int shadow)
 {
-	int lit = (pct * 4 + 50) / 100, thick = size >= 32 ? 3 : 2;
+	/* small fans get three arcs with wider spacing: four arcs 20% apart mush together below ~20 px */
+	int narcs = size < 20 ? 3 : 4, step = narcs == 3 ? 30 : 20;
+	int lit = (pct * narcs + 50) / 100, thick = size >= 32 ? 3 : 2;
 	for (int pass = shadow ? 0 : 1; pass < 2; pass++) {
 		uint32_t lc = pass ? col : RGB(12, 16, 12), dc = pass ? dimc : RGB(12, 16, 12);
 		int o = pass ? 0 : 1;
 		lcd_disc(l, cx + o, base - size / 8 + o, size / 10 < 2 ? 2 : size / 10, pct > 0 ? lc : dc);
-		for (int i = 0; i < 4; i++) {
-			int r = size * (38 + i * 20) / 100;
+		for (int i = 0; i < narcs; i++) {
+			int r = size * (38 + i * step) / 100;
 			uint32_t c = i < lit ? lc : dc;
 			for (int a = 0; a <= 32; a++) {
 				double t = M_PI * (-0.89 + 0.78 * a / 32.0);   /* sweep above the dot (screen y is down) */
@@ -1232,7 +1243,9 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 				int lx = noicon ? sp.x0 : sp.x0 + size + 6;
 				const font_t *lf2 = ((int)strlen(lab) * lf->w > sp.x1 - lx && lf != &FONT_T12) ? &FONT_T12 : lf;   /* shrink before truncating */
 				ellipsize(lf2, lab, sp.x1 - lx, 0, out, sizeof(out));
-				lcd_draw(l, lf2, lx, ry + (rowh - lf2->h) / 2, out, col, LCD_TRANSPARENT, 1);
+				/* the fan sits low in its row (dot at the bottom): centre the label on it, not on the row */
+				int lyy = !noicon && v[i].wifi ? ry + size - (fs + fs / 8) / 2 - lf2->h / 2 : ry + (rowh - lf2->h) / 2;
+				lcd_draw(l, lf2, lx, lyy, out, col, LCD_TRANSPARENT, 1);
 			}
 		} else {
 			int cw = (sp.x1 - sp.x0 + 1) / n, cx = sp.x0 + cw * i + cw / 2;
@@ -1244,7 +1257,8 @@ static void draw_uplinks(lcd_t *l, span_t sp, int y, int size, const status_t *s
 			}
 			if (!noname) {
 				ellipsize(&FONT_T12, lab, cw - 2, 0, out, sizeof(out));
-				lcd_draw(l, &FONT_T12, cx - lcd_text_w(&FONT_T12, out, 1) / 2, y + (noicon ? 1 : size + 2), out, col, LCD_TRANSPARENT, 1);
+				/* the port glyph ends above the row's bottom edge: its label sits closer than the fan's */
+				lcd_draw(l, &FONT_T12, cx - lcd_text_w(&FONT_T12, out, 1) / 2, y + (noicon ? 1 : v[i].wifi ? size + 2 : size), out, col, LCD_TRANSPARENT, 1);
 			}
 		}
 	}
@@ -1329,7 +1343,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	if (wd->type == W_ROW) {           /* a shared line is as tall as its tallest visible member */
 		int m = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval };
 			int hh = widget_h(&t, c);
 			if (hh > m) m = hh;
 		}
@@ -1361,6 +1375,7 @@ static int widget_h(const widget_t *wd, const ctx_t *c)
 	case W_VPN: return strcmp(c->s->vpn_state, "none") && c->s->vpn_state[0] ? wd->size + PAD : 0;
 	case W_RULE: return RULE_H;
 	case W_SPEED: return 2 * (wd->size + PAD);
+	case W_SPEEDBAR: case W_SPEEDDN: case W_SPEEDUP: case W_USAGEBAR: case W_USAGEDN: case W_USAGEUP: return wd->size + 1;   /* bars pack tighter */
 	case W_LEGEND: return legend_rows(c->tr, 0, wd->size) * LEGEND_ROW;
 	case W_LEGENDTOTAL: return legend_rows(c->tr, 1, wd->size) * LEGEND_ROW;
 	case W_DONUT: return wd->size + PAD;
@@ -1405,12 +1420,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		/* visible members get equal cells of the span, each drawn centred in its cell */
 		int vis[MAX_SUB], nv = 0;
 		for (int i = 0; i < wd->nsub; i++) {
-			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon };
+			widget_t t = { .type = wd->sub[i].type, .size = wd->sub[i].size, .wrap = wd->sub[i].wrap, .shrink = wd->sub[i].shrink, .bg = wd->sub[i].bg, .fit = wd->sub[i].fit, .cores = wd->sub[i].cores, .layout = wd->sub[i].layout, .generic = wd->sub[i].generic, .noname = wd->sub[i].noname, .noicon = wd->sub[i].noicon, .showval = wd->sub[i].showval };
 			if (widget_h(&t, c)) vis[nv++] = i;
 		}
 		int width = sp.x1 - sp.x0 + 1, cw = nv ? width / nv : width;
 		for (int k = 0; k < nv; k++) {
-			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon };
+			widget_t t = { .type = wd->sub[vis[k]].type, .size = wd->sub[vis[k]].size, .wrap = wd->sub[vis[k]].wrap, .shrink = wd->sub[vis[k]].shrink, .bg = wd->sub[vis[k]].bg, .fit = wd->sub[vis[k]].fit, .cores = wd->sub[vis[k]].cores, .layout = wd->sub[vis[k]].layout, .generic = wd->sub[vis[k]].generic, .noname = wd->sub[vis[k]].noname, .noicon = wd->sub[vis[k]].noicon, .showval = wd->sub[vis[k]].showval };
 			span_t cell = { sp.x0 + k * cw, k == nv - 1 ? sp.x1 : sp.x0 + (k + 1) * cw - 1 };
 			widget_draw_sp(l, w, &t, c, y, h, cell);
 		}
@@ -1528,12 +1543,12 @@ static void widget_draw_sp(lcd_t *l, const win_t *w, const widget_t *wd, ctx_t *
 		draw_speed_line(l, sp, y + h / 2, h / 2, wd->size, 0, c->tr->up, c->tr->valid);
 		break;
 	case W_SPEED1: draw_speed1(l, sp, y, h, c->tr); break;
-	case W_SPEEDBAR: draw_share_bar(l, c->tr, 0, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
-	case W_SPEEDDN: draw_share_bar_m(l, c->tr, BM_DRATE, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size, 1); break;
-	case W_SPEEDUP: draw_share_bar_m(l, c->tr, BM_URATE, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size, 0); break;
-	case W_USAGEBAR: draw_share_bar(l, c->tr, 1, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
-	case W_USAGEDN: draw_total_bar(l, c->tr, 1, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
-	case W_USAGEUP: draw_total_bar(l, c->tr, 0, sp.x0, y + PAD / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_SPEEDBAR: draw_share_bar(l, c->tr, 0, sp.x0, y + (h - wd->size) / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_SPEEDDN: draw_share_bar_m(l, c->tr, BM_DRATE, sp.x0, y + (h - wd->size) / 2, sp.x1 - sp.x0 + 1, wd->size, 1, wd->showval); break;
+	case W_SPEEDUP: draw_share_bar_m(l, c->tr, BM_URATE, sp.x0, y + (h - wd->size) / 2, sp.x1 - sp.x0 + 1, wd->size, 0, wd->showval); break;
+	case W_USAGEBAR: draw_share_bar(l, c->tr, 1, sp.x0, y + (h - wd->size) / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_USAGEDN: draw_total_bar(l, c->tr, 1, sp.x0, y + (h - wd->size) / 2, sp.x1 - sp.x0 + 1, wd->size); break;
+	case W_USAGEUP: draw_total_bar(l, c->tr, 0, sp.x0, y + (h - wd->size) / 2, sp.x1 - sp.x0 + 1, wd->size); break;
 	case W_USAGE:
 		if (c->tr->valid) fmt_bytes(c->tr->dtot + c->tr->utot, buf, sizeof(buf));
 		else copy(buf, sizeof(buf), "--");
@@ -1631,7 +1646,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 
 	/* No panel indicator any more: the online status is a widget (status) placed like any other,
 	 * so it can also share a line with e.g. the client count. Content starts at the top margin. */
-	int top = w->y0 + 4;
+	int top = w->y0 + 2;
 
 	/* widgets: stacked, spare room spread evenly (at most 14 px between them) */
 	int hs[MAX_WIDGETS], nvis = 0, total = 0, bottom = w->y1 - 3;
@@ -1646,7 +1661,7 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			for (int j = 0; j < sc->w[i].nsub; j++) {
 				int st = sc->w[i].sub[j].type;
 				if (st == W_WANIP || st == W_LANIP || st == W_VPN || st == W_UPTIME || st == W_USAGE) {
-					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon };
+					widget_t mt = { .type = st, .size = sc->w[i].sub[j].size, .wrap = sc->w[i].sub[j].wrap, .shrink = sc->w[i].sub[j].shrink, .bg = sc->w[i].sub[j].bg, .fit = sc->w[i].sub[j].fit, .cores = sc->w[i].sub[j].cores, .layout = sc->w[i].sub[j].layout, .generic = sc->w[i].sub[j].generic, .noname = sc->w[i].sub[j].noname, .noicon = sc->w[i].sub[j].noicon, .showval = sc->w[i].sub[j].showval };
 					widget_draw(NULL, w, &mt, &c, top, hs[i]);
 				}
 			}
@@ -1661,7 +1676,8 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			if (gap < 2) gap = 2;
 			if (gap > 14) gap = 14;
 		}
-		int y = top + (spare - gap * (nvis - 1)) / 2;
+		/* fixed spacing: stack centred; auto: one gap at the top, the rest of the spare room below */
+		int y = sc->spacing >= 0 ? top + (spare - gap * (nvis - 1)) / 2 : top + gap;
 		if (y < top) y = top;
 		for (int i = 0; i < sc->nw; i++) {
 			if (!hs[i]) continue;
