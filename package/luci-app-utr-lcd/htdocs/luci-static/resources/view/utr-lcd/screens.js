@@ -51,7 +51,7 @@ var TYPES = {
 
 var DEFAULT_SCREENS = [
 	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, backfill: false,
-	  widgets: [ ['status', 16], ['segbar', 16], ['dbm', 32], ['ssid', 24], ['clients', 24] ] },
+	  widgets: [ ['status', 16], ['segbar', 16], ['dbm', 32], ['ssid', 24, false, true], ['clients', 24] ] },
 	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, backfill: true,
 	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
 	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, backfill: true,
@@ -60,8 +60,9 @@ var DEFAULT_SCREENS = [
 
 /* Height in pixels a widget needs (the same table as widget_h in lcd-status.c; widgets with nothing to
  * show right now take no room, so this is the worst case). */
-function widgetHeight(type, size) {
+function widgetHeight(type, size, wrap) {
 	size = +size;
+	if (type === 'ssid' && wrap) return 2 * size + 2;   /* wrapped name may take a second line */
 	switch (type) {
 	case 'rule': return 6;
 	case 'speed': return 2 * (size + 2);
@@ -81,7 +82,7 @@ function availableHeight() {
 function lineHeights(widgets) {
 	var lines = [], cur = 0;
 	widgets.forEach(function(w, i) {
-		cur = Math.max(cur, widgetHeight(w[0], w[1]));
+		cur = Math.max(cur, widgetHeight(w[0], w[1], w[3]));
 		if (!w[2] || i === widgets.length - 1) { lines.push(cur); cur = 0; }
 	});
 	return lines;
@@ -105,9 +106,13 @@ function groupSize(widgets, wi) {
 function parseWidget(str) {
 	var p = String(str).split(':'), t = TYPES[p[0]];
 	if (!t) return null;
-	var size = +p[1];
+	var size = parseInt(p[1], 10);
 	if (!size || (t.sizes && t.sizes.indexOf(size) < 0)) size = t.def;
-	return [p[0], size, false];
+	return [p[0], size, false, /w/.test(p[1] || '')];   /* 4th: wrap to two lines (ssid:24w) */
+}
+
+function widgetSpec(w) {
+	return w[0] + ':' + w[1] + (w[3] ? 'w' : '');
 }
 
 /* One config item: "type:size" or several joined by '+' for one shared line. */
@@ -128,7 +133,7 @@ function flatten(main, screens) {
 			'indicator=none', 'backfill=' + (s.backfill ? 1 : 0));
 		var line = [];
 		s.widgets.forEach(function(w, i) {
-			line.push(w[0] + ':' + w[1]);
+			line.push(widgetSpec(w));
 			if (!w[2] || i === s.widgets.length - 1) { out.push('widget=' + line.join('+')); line = []; }
 		});
 	});
@@ -300,10 +305,13 @@ return view.extend({
 				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
 					'checked': w[2] ? '' : null, 'disabled': (wi === sc.widgets.length - 1 || joinFull) ? '' : null,
 					'change': function() { w[2] = this.checked; redraw(); } })),
+				E('td', { 'style': 'text-align:center' }, w[0] === 'ssid' ? E('input', { 'type': 'checkbox', 'title': _('Wrap a long name to a second line instead of cutting it'),
+					'checked': w[3] ? '' : null,
+					'change': function() { w[3] = this.checked; redraw(); } }) : E('span', { 'style': 'opacity:.6' }, '-')),
 				E('td', {}, t.sizes ? select(t.sizes.map(function(s) { return [ s, sizeLabel(t, s) ]; }), w[1], function(v) {
 					w[1] = +v; redraw();
 				}) : E('span', { 'style': 'opacity:.6' }, '-')),
-				E('td', { 'style': 'text-align:right; opacity:.7; white-space:nowrap' }, widgetHeight(w[0], w[1]) + ' px'),
+				E('td', { 'style': 'text-align:right; opacity:.7; white-space:nowrap' }, widgetHeight(w[0], w[1], w[3]) + ' px'),
 				E('td', { 'style': 'white-space:nowrap' }, [
 					btn('\u2191', function() { move(sc.widgets, wi, -1); redraw(); }, wi === 0, _('Move up')),
 					btn('\u2193', function() { move(sc.widgets, wi, 1); redraw(); }, wi === sc.widgets.length - 1, _('Move down')),
@@ -364,7 +372,7 @@ return view.extend({
 				E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start' }, [
 					E('div', { 'style': 'flex:1 1 300px; min-width:0' }, [
 						sc.widgets.length ? E('div', { 'style': 'overflow-x:auto' }, E('table', { 'class': 'table', 'style': 'width:100%' }, [
-							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Join next')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
+							E('tr', { 'class': 'tr table-titles' }, [ E('th', { 'class': 'th' }, _('Widget')), E('th', { 'class': 'th' }, _('Join next')), E('th', { 'class': 'th' }, _('Wrap')), E('th', { 'class': 'th' }, _('Size')), E('th', { 'class': 'th' }, _('Height')), E('th', { 'class': 'th' }, '') ])
 						].concat(sc.widgets.map(function(_w, wi) { return widgetRow(sc, wi); })))) : E('em', {}, _('Nothing on this screen yet.')),
 						E('div', { 'style': 'margin-top:8px' }, addSel),
 						meter,
@@ -465,7 +473,7 @@ return view.extend({
 			uci.set('utr-lcd', sid, 'backfill', s.backfill ? '1' : '0');
 			var wlist = [], line = [];
 			s.widgets.forEach(function(w, i) {
-				line.push(w[0] + ':' + w[1]);
+				line.push(widgetSpec(w));
 				if (!w[2] || i === s.widgets.length - 1) { wlist.push(line.join('+')); line = []; }
 			});
 			uci.set('utr-lcd', sid, 'widget', wlist);
