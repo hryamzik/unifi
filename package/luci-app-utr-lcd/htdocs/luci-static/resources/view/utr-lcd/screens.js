@@ -149,7 +149,7 @@ function flatten(main, screens) {
 	];
 	screens.forEach(function(s) {
 		out.push('screen=' + String(s.name).replace(/[\r\n]/g, ' '), 'dwell=' + s.dwell, 'spacing=' + (s.spacing || 'auto'), 'enabled=' + (s.enabled ? 1 : 0),
-			'indicator=none', 'backfill=' + (s.backfill ? 1 : 0));
+			'indicator=none', 'backfill=' + (s.backfill ? 1 : 0), 'debug=' + (s.debug ? 1 : 0));
 		var line = [];
 		s.widgets.forEach(function(w, i) {
 			line.push(widgetSpec(w));
@@ -241,13 +241,13 @@ return view.extend({
 			return {
 				name: s.name || _('Screen'), dwell: s.dwell || '8', enabled: bool(s.enabled, true),
 				spacing: (s.spacing === 'auto' || /^[0-9]+$/.test(s.spacing || '')) ? (s.spacing || 'auto') : 'auto',
-				backfill: bool(s.backfill, true),
+				backfill: bool(s.backfill, true), debug: bool(s.debug, false),
 				widgets: list.reduce(function(acc, item) { return acc.concat(parseWidgetList(item)); }, [])
 			};
 		});
 		if (!screens.length)
 			screens = DEFAULT_SCREENS.map(function(s) {
-				return { name: s.name, dwell: s.dwell, spacing: s.spacing, enabled: s.enabled, backfill: s.backfill,
+				return { name: s.name, dwell: s.dwell, spacing: s.spacing, enabled: s.enabled, backfill: s.backfill, debug: !!s.debug,
 					widgets: s.widgets.map(function(w) { return w.slice(); }) };
 			});
 
@@ -406,6 +406,7 @@ return view.extend({
 					check(sc.enabled, function(v) { sc.enabled = v; redraw(); }, _('In rotation')),
 					select([ [ 'auto', _('Spacing: auto') ], [ '0', _('Spacing: 0 px') ], [ '1', _('Spacing: 1 px') ], [ '2', _('Spacing: 2 px') ], [ '4', _('Spacing: 4 px') ], [ '6', _('Spacing: 6 px') ], [ '8', _('Spacing: 8 px') ], [ '12', _('Spacing: 12 px') ], [ '18', _('Spacing: 18 px') ] ], sc.spacing, function(v) { sc.spacing = v; redraw(); }),
 					check(sc.backfill, function(v) { sc.backfill = v; redraw(); }, _('Signal background')),
+				check(sc.debug, function(v) { sc.debug = v; redraw(); }, _('Debug line')),
 					btn('\u2191', function() { move(screens, si, -1); redraw(); }, si === 0, _('Move screen up')),
 					btn('\u2193', function() { move(screens, si, 1); redraw(); }, si === screens.length - 1, _('Move screen down')),
 					btn(_('Remove screen'), function() {
@@ -415,7 +416,7 @@ return view.extend({
 						if (screens.length >= 12) return;
 						screens.splice(si + 1, 0, {
 							name: sc.name + ' ' + _('copy'), dwell: sc.dwell, spacing: sc.spacing, enabled: sc.enabled,
-							backfill: sc.backfill, _folded: false,
+							backfill: sc.backfill, debug: sc.debug, _folded: false,
 							widgets: sc.widgets.map(function(w) { return w.slice(); })
 						});
 						redraw();
@@ -492,7 +493,7 @@ return view.extend({
 			globals, container,
 			E('div', {}, btn(_('Add screen'), function() {
 				if (screens.length >= 12) return;
-				screens.push({ name: _('Screen') + ' ' + (screens.length + 1), dwell: '8', spacing: 'auto', enabled: true, backfill: true, widgets: [] });
+				screens.push({ name: _('Screen') + ' ' + (screens.length + 1), dwell: '8', spacing: 'auto', enabled: true, backfill: true, debug: false, widgets: [] });
 				redraw();
 			}, false))
 		]);

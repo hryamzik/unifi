@@ -456,7 +456,7 @@ typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, 
 typedef struct { int type, size, wrap, shrink, bg, fit, cores, layout, generic, noname, noicon, showval; wspec_t sub[MAX_SUB]; int nsub; } widget_t;   /* nsub > 0: type is W_ROW */
 typedef struct {
 	char name[24];
-	int dwell_ms, enabled, indicator, backfill;
+	int dwell_ms, enabled, indicator, backfill, debug;
 	int spacing;                       /* gap between widgets in px; -1 = auto (spread, capped) */
 	widget_t w[MAX_WIDGETS];
 	int nw;
@@ -512,6 +512,7 @@ static void conf_line(config_t *c, char *line)
 	}
 	else if (!strcmp(line, "indicator")) s->indicator = !strcmp(eq, "pill") ? ST_PILL : !strcmp(eq, "none") ? ST_NONE : ST_DOT;
 	else if (!strcmp(line, "backfill")) s->backfill = atoi(eq) != 0;
+	else if (!strcmp(line, "debug")) s->debug = atoi(eq) != 0;
 	else if (!strcmp(line, "widget") && s->nw < MAX_WIDGETS) {
 		/* one widget, or several joined by '+' to share one line (at most MAX_SUB) */
 		wspec_t specs[MAX_SUB + 1];
@@ -930,9 +931,9 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 	int pitch = PITCH[step], r = n > h / pitch ? h / pitch : n;
 	const font_t *nf = step >= 2 ? &FONT_T12 : &FONT_T16, *vf = step >= 2 ? &FONT_T12 : &FONT_T16B;
 	int named = n > r ? r - 1 : n;        /* leave the last row for "+k others" */
-	int bgmode = bg == 1 || bg == 4 ? BM_RATE : bg == 2 || bg == 5 ? BM_TOTAL : 0;
+	int bgmode = bg == 2 || bg == 5 ? BM_TOTAL : BM_RATE, hasbg = bg == 1 || bg == 2 || bg == 4 || bg == 5;
 	double bgmax = 0;
-	if (bgmode) for (int i = 0; i < named; i++) { double v = client_val(&t->c[idx[i]], bgmode); if (v > bgmax) bgmax = v; }
+	if (hasbg) for (int i = 0; i < named; i++) { double v = client_val(&t->c[idx[i]], bgmode); if (v > bgmax) bgmax = v; }
 	char nm[48], val[16];
 	for (int i = 0; i < r; i++, y += pitch) {
 		sp = span_for(w, y, pitch);          /* rows near a corner are narrower */
@@ -943,7 +944,7 @@ static void draw_legend(lcd_t *l, const win_t *w, const traffic_t *t, int by_tot
 			if (room > (name_len < 12 ? 12 : name_len) * nf->w) room = (name_len < 12 ? 12 : name_len) * nf->w;
 			if (room < 24) nm[0] = 0;                 /* no room for even a short name: chip and value only */
 			else ellipsize(nf, c->name, room, 0, nm, sizeof(nm));
-			if (bgmode && bgmax > 0) {                /* background bar: this client's share of the widest */
+			if (hasbg && bgmax > 0) {                 /* background bar: this client's share of the widest */
 				int bw = (sp.x1 + 1 - sp.x0) * (int)(client_val(c, bgmode) * 100 / bgmax) / 100;
 				if (bw > 0) lcd_fill(l, sp.x0, y, bw, pitch - 1, dim_color(bar_color(PALETTE[c->color]), 65));
 			}
@@ -1742,6 +1743,20 @@ static void draw_screen(lcd_t *l, const win_t *w, const config_t *cf, const scre
 			widget_draw(l, w, &sc->w[i], &c, y, hs[i]);
 			y += hs[i] + gap;
 		}
+	}
+	if (sc->debug) {          /* test aid: the maxima the legend/bar scaling divides by */
+		char dbg[64], a[16], b[16];
+		double mxr = 0, mxt = 0;
+		for (int i = 0; i < tr->n; i++) {
+			if (tr->c[i].rate > mxr) mxr = tr->c[i].rate;
+			if (tr->c[i].total > mxt) mxt = tr->c[i].total;
+		}
+		fmt_short(mxr, a, sizeof(a));
+		fmt_short(mxt, b, sizeof(b));
+		snprintf(dbg, sizeof(dbg), "R%s T%s n%d%s", a, b, tr->n, tr->valid ? "" : " STALE");
+		span_t dsp = span_for(w, w->y1 - 14, 13);          /* inside the bezel window, unlike the panel edge */
+		lcd_fill(l, dsp.x0, w->y1 - 14, dsp.x1 + 1 - dsp.x0, 14, RGB(0, 0, 0));
+		lcd_draw(l, &FONT_T12, dsp.x0 + 2, w->y1 - 12, dbg, C_WARN, LCD_TRANSPARENT, 1);
 	}
 	lcd_flush(l);
 }
