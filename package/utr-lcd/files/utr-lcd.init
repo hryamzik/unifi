@@ -64,7 +64,7 @@ write_screens() {
 	config_get smode    main screen_mode rotate
 	config_get spin     main screen_pin 1
 	config_get playlist main playlist ''
-	config_get fdim     main fill_dim 30
+	config_get fdim     main fill_dim 40
 	config_get fedge    main fill_edge 1
 	config_get nlen     main name_len 8
 	WL_MODE=$smode; WL_PIN=$spin; WL_PLAYLIST=$(echo "$playlist" | tr ',' ' ')

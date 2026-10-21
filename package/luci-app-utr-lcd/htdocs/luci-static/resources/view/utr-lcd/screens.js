@@ -59,11 +59,14 @@ var TYPES = {
 
 var DEFAULT_SCREENS = [
 	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, backfill: false,
-	  widgets: [ ['status', 16], ['segbar', 16], ['dbm', 32], ['ssid', 24, false, true, true], ['clients', 24] ] },
-	{ name: 'Traffic', dwell: '8', spacing: 'auto', enabled: true, backfill: true,
-	  widgets: [ ['speed', 24], ['speedbar', 12], ['usage', 16], ['usagebar', 12], ['legend', 4] ] },
-	{ name: 'Details', dwell: '5', spacing: 'auto', enabled: true, backfill: true,
-	  widgets: [ ['wanip', 16], ['lanip', 16], ['vpn', 16], ['uptime', 16], ['cpu', 16], ['ram', 16], ['flash', 16], ['load', 16], ['temp', 16] ] }
+	  widgets: [ ['status', 16], ['segbar', 24], ['dbm', 32], ['ssid', 32, false, true, true], ['vpn', 16], ['rule', 2], ['clients', 24] ] },
+	{ name: 'Traffic', dwell: '8', spacing: '0', enabled: true, backfill: true,
+	  widgets: [ ['uplinks', 24, false, false, false, 0, 0, 0, false, false, true], ['cpuram', 12, false, false, false, 0, 0, 0, false, false, false, false, false, false, false, 1],
+	    ['speeddn', 20, false, false, false, 0, 0, 0, false, false, false, false, true], ['speedup', 20, false, false, false, 0, 0, 0, false, false, false, false, true],
+	    ['usagedn', 20], ['usageup', 20], ['rule', 2], ['legend', 4, false, false, false, 4, 2, 0, false, false, false, false, false, true, true], ['status', 16, false, false, false, 0, 0, 0, false, false, false, false, false, false, false, 0, true] ] },
+	{ name: 'Details', dwell: '5', spacing: '1', enabled: true, backfill: true,
+	  widgets: [ ['status', 16, true, true, true], ['clients', 24], ['wanip', 12], ['lanip', 16], ['vpn', 16], ['uptime', 16],
+	    ['cpu', 16, false, false, false, 0, 0, 2], ['ram', 16], ['flash', 16], ['temp', 16], ['sigbar', 16], ['load', 16] ] }
 ];
 
 /* Height in pixels a widget needs (the same table as widget_h in lcd-status.c; widgets with nothing to
@@ -233,7 +236,7 @@ return view.extend({
 			screen_mode: uci.get('utr-lcd', 'main', 'screen_mode') === 'pin' ? 'pin' : 'rotate',
 			screen_pin: uci.get('utr-lcd', 'main', 'screen_pin') || '1',
 			playlist: uci.get('utr-lcd', 'main', 'playlist') || '',
-			fill_dim: uci.get('utr-lcd', 'main', 'fill_dim') || '30',
+			fill_dim: uci.get('utr-lcd', 'main', 'fill_dim') || '40',
 			fill_edge: bool(uci.get('utr-lcd', 'main', 'fill_edge'), true),
 			name_len: uci.get('utr-lcd', 'main', 'name_len') || '8'
 		};
@@ -466,7 +469,7 @@ return view.extend({
 				E('h3', { 'style': 'margin-top:14px' }, _('Look')),
 				E('div', { 'style': 'display:flex; flex-wrap:wrap; gap:14px; align-items:center' }, [
 					E('span', {}, [ _('Signal background brightness'), ' ', text(main.fill_dim, function(v) {
-						var n = parseInt(v, 10); main.fill_dim = String(isNaN(n) ? 30 : Math.max(5, Math.min(100, n))); redraw();
+						var n = parseInt(v, 10); main.fill_dim = String(isNaN(n) ? 40 : Math.max(5, Math.min(100, n))); redraw();
 					}, 50, 'number'), ' %' ]),
 					check(main.fill_edge, function(v) { main.fill_edge = v; redraw(); }, _('Bright line at the edge of the fill')),
 					E('span', {}, [ _('Client names up to'), ' ', text(main.name_len, function(v) {

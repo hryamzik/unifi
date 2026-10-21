@@ -472,14 +472,15 @@ typedef struct {
 } config_t;
 
 static const char DEFAULT_CONF[] =
-	"fill_dim=30\nfill_edge=1\n"
-	"screen=Status\ndwell=8\nbackfill=0\nwidget=status:16\nwidget=segbar:16\nwidget=dbm:32\nwidget=ssid:24ws\n"
-	"widget=clients:24\n"
-	"screen=Traffic\ndwell=8\nbackfill=1\nwidget=speed:24\nwidget=speedbar:12\nwidget=usage:16\n"
-	"widget=usagebar:12\nwidget=legend:4\n"
-	"screen=Details\ndwell=5\nbackfill=1\n"
-	"widget=wanip:16\nwidget=lanip:16\nwidget=vpn:16\nwidget=uptime:16\n"
-	"widget=cpu:16\nwidget=ram:16\nwidget=flash:16\nwidget=load:16\nwidget=temp:16\n";
+	"fill_dim=40\nfill_edge=1\n"
+	"screen=Status\ndwell=8\nspacing=auto\nbackfill=0\nwidget=status:16\nwidget=segbar:24\nwidget=dbm:32\n"
+	"widget=ssid:32ws\nwidget=vpn:16\nwidget=rule:2\nwidget=clients:24\n"
+	"screen=Traffic\ndwell=8\nspacing=0\nbackfill=1\nwidget=uplinks:24n\nwidget=cpuram:12G\n"
+	"widget=speeddn:20v\nwidget=speedup:20v\nwidget=usagedn:20\nwidget=usageup:20\nwidget=rule:2\n"
+	"widget=legend:4b4Fpx\nwidget=status:16B\n"
+	"screen=Details\ndwell=5\nspacing=1\nbackfill=1\nwidget=status:16ws+clients:24\nwidget=wanip:12\n"
+	"widget=lanip:16\nwidget=vpn:16\nwidget=uptime:16\nwidget=cpu:16r\nwidget=ram:16\nwidget=flash:16\n"
+	"widget=temp:16\nwidget=sigbar:16\nwidget=load:16\n";
 
 static void conf_line(config_t *c, char *line)
 {
@@ -593,7 +594,7 @@ static void conf_parse(config_t *c, const char *text)
 static void conf_load(config_t *c, const char *path)
 {
 	memset(c, 0, sizeof(*c));
-	c->fill_dim = 30; c->fill_edge = 1; c->name_len = 8;
+	c->fill_dim = 40; c->fill_edge = 1; c->name_len = 8;
 	char text[4096];
 	FILE *f = path ? fopen(path, "r") : NULL;
 	size_t n = f ? fread(text, 1, sizeof(text) - 1, f) : 0;
