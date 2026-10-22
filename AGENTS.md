@@ -28,6 +28,7 @@ State verified facts as verified and label hypotheses as hypotheses (open ones a
 
 ## Git and ownership
 
+The repository is https://github.com/hryamzik/unifi (public, `main`); upstreaming plan in `docs/upstreaming.md`.
 Roman Belyakovsky (`git config user.name` / `user.email`) is the only author and committer of every commit and the only author of every pull request.
 Commit messages and PR bodies carry no `Co-authored-by`, `Generated with`, tool or AI attribution lines, and no mention of the assistant.
 The Cursor agent environment appends `Co-authored-by: Cursor` to messages made with `git commit`; make commits with `tools/commit.sh "subject" ["body"]` (plumbing, no trailer injection) after `git add`.
