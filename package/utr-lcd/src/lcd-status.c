@@ -445,7 +445,7 @@ static const wtype_t WTYPES[W_NTYPES] = {
 	[W_MULTIWAN] = { "multiwan", 16 },      /* share of traffic per uplink (hidden with a single uplink); size 12 or 16 */
 	[W_UPLINKS] = { "uplinks", 24 },        /* uplink icons + state (mwan3 when available); never hidden; size = icon 16 or 24 */
 	[W_TEMP]    = { "temp", 16 },           /* Wi-Fi chip temperature (hidden when there is no sensor) */
-	[W_CPURAM]  = { "cpuram", 12 },         /* CPU and RAM side by side on one line (for non-resource screens) */
+	[W_CPURAM]  = { "cpuram", 16 },         /* CPU and RAM side by side on one line (for non-resource screens) */
 };
 
 #define MAX_WIDGETS 16
@@ -475,7 +475,7 @@ static const char DEFAULT_CONF[] =
 	"fill_dim=40\nfill_edge=1\n"
 	"screen=Status\ndwell=8\nspacing=auto\nbackfill=0\nwidget=status:16\nwidget=segbar:24\nwidget=dbm:32\n"
 	"widget=ssid:32ws\nwidget=vpn:16\nwidget=rule:2\nwidget=clients:24\n"
-	"screen=Traffic\ndwell=8\nspacing=0\nbackfill=1\nwidget=uplinks:24n\nwidget=cpuram:12G\n"
+	"screen=Traffic\ndwell=8\nspacing=0\nbackfill=1\nwidget=uplinks:24n\nwidget=cpuram:16G\n"
 	"widget=speeddn:20v\nwidget=speedup:20v\nwidget=usagedn:20\nwidget=usageup:20\nwidget=rule:2\n"
 	"widget=legend:4b4Fpx\nwidget=status:16B\n"
 	"screen=Details\ndwell=5\nspacing=1\nbackfill=1\nwidget=status:16ws+clients:24\nwidget=wanip:12\n"
