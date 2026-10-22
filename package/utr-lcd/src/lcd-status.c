@@ -1317,6 +1317,18 @@ enum { UV_OK, UV_DIM, UV_NOROUTE, UV_OFF };
 
 /* Display list: mwan3 interfaces when the collector heard from mwan3 (they are shown even
  * without a default route - that mismatch is the point), otherwise the route uplinks. */
+/* Uplink colour when mwan3 has no say (not installed, or this uplink is not managed by it):
+ * fall back to the internet status - the primary route is green when the internet works,
+ * amber when there is a route but the check fails; extra routes are dim standby until used. */
+static int route_state(const status_t *s, int primary, double rate)
+{
+	if (primary) {
+		if (strcmp(s->up_state, "up")) return UV_OFF;
+		return !strcmp(s->inet, "fail") ? UV_NOROUTE : UV_OK;   /* amber, as with mwan3 */
+	}
+	return rate > 0 ? UV_OK : UV_DIM;
+}
+
 static int build_uplinks(const status_t *s, const traffic_t *t, uview_t *v)
 {
 	int n = 0;
@@ -1352,7 +1364,7 @@ static int build_uplinks(const status_t *s, const traffic_t *t, uview_t *v)
 			u->wifi = !strcmp(s->ups[j].type, "wifi");
 			u->signal = s->ups[j].signal; u->has_signal = s->ups[j].has_signal;
 			for (int k = 0; k < t->nu; k++) if (!strcmp(t->u[k].dev, s->ups[j].dev)) { u->down = t->u[k].down; u->up = t->u[k].up; }
-			u->state = u->down + u->up > 0 ? UV_OK : UV_DIM;
+			u->state = route_state(s, j == 0, u->down + u->up);
 			n++;
 		}
 		return n;
@@ -1365,7 +1377,7 @@ static int build_uplinks(const status_t *s, const traffic_t *t, uview_t *v)
 		u->wifi = !strcmp(s->ups[i].type, "wifi");
 		u->signal = s->ups[i].signal; u->has_signal = s->ups[i].has_signal;
 		for (int j = 0; j < t->nu; j++) if (!strcmp(t->u[j].dev, s->ups[i].dev)) { u->down = t->u[j].down; u->up = t->u[j].up; }
-		u->state = u->down + u->up > 0 ? UV_OK : UV_DIM;
+		u->state = route_state(s, i == 0, u->down + u->up);
 		n++;
 	}
 	return n;
