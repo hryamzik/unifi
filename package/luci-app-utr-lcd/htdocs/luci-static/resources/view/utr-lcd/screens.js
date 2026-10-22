@@ -57,6 +57,43 @@ var TYPES = {
 	temp:        { label: 'Wi-Fi chip temperature', group: 'resources', sizes: [12, 16], def: 16 }
 };
 
+/* one-line explanations, shown in the widget's Options cell (the details nobody can guess) */
+var DESCS = {
+	status: _('Globe and words: green ONLINE, amber NO INTERNET (uplink up, check failing), red NO UPLINK. In a shared line only the globe shows.'),
+	segbar: _('Wi-Fi signal as the stock-style bar of 10 segments; lit segments = strength. Wi-Fi uplinks only.'),
+	bars: _('Wi-Fi signal as five ascending bars; lit bars = strength. Wi-Fi uplinks only.'),
+	fan: _('Wi-Fi fan icon; lit arcs = signal strength (4 arcs full, fewer when weak). Wi-Fi uplinks only.'),
+	dbm: _('Wi-Fi signal strength in dBm as large text (e.g. -52 dBm; closer to zero is better). Wi-Fi uplinks only.'),
+	sigbar: _('Wi-Fi signal as a resource-style bar with a percent value; at 24 px the dBm value sits on top. Wi-Fi uplinks only.'),
+	ssid: _('Name of the network the uplink is connected to (SSID, or Ethernet). Wrap puts a long name on two lines, Shrink then steps the font down until it fits.'),
+	clients: _('How many clients are connected now (person icon with a count).'),
+	wanip: _('The address of the primary uplink (WAN side). Long addresses are shortened in the middle.'),
+	lanip: _('The router address on the LAN (br-lan).'),
+	vpn: _('VPN state: shield with the interface name when up, hidden when no VPN is configured.'),
+	uptime: _('Time since boot, e.g. 2h 32m.'),
+	rule: _('A thin horizontal divider line.'),
+	speed: _('Current download and upload speed of the primary uplink, two lines.'),
+	speed1: _('Current download and upload speed on one line.'),
+	speedbar: _('Current speed split by client; colours match the client list. A white segment is traffic no client accounts for (the router itself); the bar is scaled by the real total.'),
+	speeddn: _('Download speed split by client. Show speed value writes the total download speed on the bar. White = unattributed (the router itself).'),
+	speedup: _('Upload speed split by client. Show speed value writes the total upload speed on the bar. White = unattributed (the router itself).'),
+	usage: _('Total traffic since boot as one number (download + upload).'),
+	usagebar: _('Downloaded + uploaded bytes split by client, total written inside the bar. White = unattributed (the router itself).'),
+	usagedn: _('Downloaded bytes split by client, total inside the bar. White = unattributed (the router itself).'),
+	usageup: _('Uploaded bytes split by client, total inside the bar. White = unattributed (the router itself).'),
+	legend: _('Clients ranked by current speed: colour chip, name, speed (down+up, e.g. 5.2M = 5.2 Mb/s). Names that are IPs are trimmed from the left (the host end counts). Background: a bar per client, widest = the leader; signal adds a 1 px line under each bar, coloured by that client strength (green/amber/red). Scale by peak: the widest bar is the fastest rate seen so far (forgotten slowly), not the current leader. Split: download bar with a thinner, brighter upload strip on top, one scale for both; the number stays the sum. Fit squeezes more rows into the same height.'),
+	legendtotal: _('Clients ranked by total traffic (bytes since boot); the number is the total. Background, peak and split work as in the speed client list (split shows uploaded vs downloaded bytes).'),
+	donut: _('Ring of the current speed split by client, with the total speed in the middle.'),
+	multiwan: _('One row per uplink with its share of the current traffic. Uses mwan3 when installed; hidden with a single uplink.'),
+	uplinks: _('One icon per uplink (Wi-Fi fan / Ethernet port): green online, amber = uplink tracked online but it has no default route (without mwan3: route exists but the internet check fails), red offline, dim = standby or idle. The two 1 px lines under the icons show the observed download (top) and upload split, in the same colours. Without mwan3 the colours fall back to the internet status.'),
+	cpu: _('CPU load: a total bar, one segment per core in a single bar, or one strip per core stacked in the row. Green below 60%, amber to 85%, red above.'),
+	cpuram: _('CPU and memory on one line. Labels + bars + %, or Graphs: one strip per CPU core and a memory bar, with or without the percent values. Memory is green below 80%, amber to 90%, red above.'),
+	ram: _('Memory used, percent. Green below 80%, amber to 90%, red above.'),
+	flash: _('Flash storage used, percent. Green below 60%, amber to 85%, red above.'),
+	load: _('Load average against the core count: background bar = 1-minute load, numbers are 1 / 5 / 15 minutes.'),
+	temp: _('Wi-Fi chip temperature; hidden when the router reports no sensor.')
+};
+
 var DEFAULT_SCREENS = [
 	{ name: 'Status', dwell: '8', spacing: 'auto', enabled: true, backfill: false,
 	  widgets: [ ['status', 16], ['segbar', 24], ['dbm', 32], ['ssid', 32, false, true, true], ['vpn', 16], ['rule', 2], ['clients', 24] ] },
@@ -366,7 +403,7 @@ return view.extend({
 				E('td', { 'style': 'text-align:center' }, w[0] === 'ssid' ? E('input', { 'type': 'checkbox', 'title': _('If the name still does not fit (on two lines when wrapping), reduce the font size step by step until it does'),
 					'checked': w[4] ? '' : null,
 					'change': function() { w[4] = this.checked; redraw(); } }) : E('span', { 'style': 'opacity:.6' }, '-')),
-				optionsCell(sc, wi),
+				(function() { var c = optionsCell(sc, wi); if (DESCS[w[0]]) c.appendChild(E('small', { 'style': 'display:block; opacity:.75; margin-top:3px; max-width:24em; white-space:normal' }, DESCS[w[0]])); return c; })(),
 				E('td', {}, t.sizes ? select(t.sizes.map(function(s) { return [ s, sizeLabel(t, s) ]; }), w[1], function(v) {
 					w[1] = +v; redraw();
 				}) : E('span', { 'style': 'opacity:.6' }, '-')),
@@ -509,7 +546,19 @@ return view.extend({
 				if (screens.length >= 12) return;
 				screens.push({ name: _('Screen') + ' ' + (screens.length + 1), dwell: '8', spacing: 'auto', enabled: true, backfill: true, debug: false, widgets: [] });
 				redraw();
-			}, false))
+			}, false)),
+			E('div', { 'class': 'cbi-section', 'style': 'margin-top:16px' }, [
+				E('h3', {}, _('Reading the panel')),
+				E('ul', { 'style': 'margin:0 0 0 18px; line-height:1.55' }, [
+					E('li', {}, _('Client colours are assigned per device and are the same in every bar and in the client list.')),
+					E('li', {}, _('White in a traffic bar is traffic no client accounts for — the router itself (updates, DNS, its own services). A fully white bar means no client traffic in that sample.')),
+					E('li', {}, _('Uplink icons: green online, amber when the uplink is up but carries no default route (or, without mwan3, when the internet check fails), red offline, dim when on standby.')),
+					E('li', {}, _('In the client list, the bright line under a name is that client Wi-Fi signal: length and colour by strength, green / amber / red.')),
+					E('li', {}, _('The signal background fills the screen from the bottom by the Wi-Fi signal of the uplink: green and full is strong, red at the bottom is weak. It only applies to Wi-Fi uplinks.')),
+					E('li', {}, _('Speeds are bits per second (5.2M = 5.2 Mb/s); totals are bytes. The client list number is download + upload.')),
+					E('li', {}, _('Widgets with nothing to show (no VPN, no sensor, a single uplink for Multi-WAN) take no room; the freed space is redistributed by the spacing setting. A widget flagged Stick to bottom pins to the lower edge instead.'))
+				])
+			])
 		]);
 		redraw();
 
