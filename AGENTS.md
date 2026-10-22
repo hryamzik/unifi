@@ -8,6 +8,7 @@ Build packages (apk, snapshot): `tools/build-package.sh` -> `build/sdk-out/ipq40
 Build package (ipk, opkg releases): `tools/build-package.sh ipq40xx-generic-24.10.4` -> `build/sdk-out/ipq40xx-generic-24.10.4/*.ipk`
 Build C only (Linux, DRM headers needed): `make -C package/utr-lcd/src` (verified in alpine with `libdrm-dev`); hardware test programs: `make -C tools/extras`
 Look at the panel yourself: `tools/lcd-shot.sh build/cam/<new-name>.jpg [PROG [ARGS]]` (iPhone camera on USB pointed at the panel; see `docs/development.md`); offline preview of every native screen (calibrated bezel, no photo needed): `tools/preview.sh OUT.png`; regenerate fonts: `tools/gen-fonts.sh`
+Build firmware image with the packages baked in: `tools/build-image.sh` -> `build/image/*ubnt_utr*sysupgrade.bin` (+ factory.ubi) (official snapshot ImageBuilder in docker; first run downloads ~600 MB into `build/imagebuilder/`)
 Build stock bundle from a firmware image: `tools/make-stock-bundle.sh fw/<firmware>.bin build/utr-ui-stock.tar.gz` (docker)
 Syntax-check scripts: `sh -n package/utr-lcd/files/*.sh package/utr-lcd/files/utr-lcd.init package/luci-app-utr-lcd/root/usr/libexec/utr-lcd/luci-status`
 Deploy to the router: `ssh root@192.168.1.1 'cat > /tmp/utr-lcd.apk' < build/sdk-out/ipq40xx-generic-master/utr-lcd-*.apk`, then `ssh root@192.168.1.1 'apk add --allow-untrusted --force-reinstall /tmp/utr-lcd.apk'`
