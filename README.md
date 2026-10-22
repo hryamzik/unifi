@@ -13,6 +13,19 @@ Two display modes (`mode` in `/etc/config/utr-lcd`):
 
 `auto` (default) uses `stock` when the bundle is installed, otherwise `native`. `stock` without the bundle also falls back to `native` (logged).
 
+## The default screens
+
+The native renderer rotates through three screens out of the box — *Status*, *Traffic* and
+*Details*. Rendered offline with example data (the panel as you would see it, bezel and all):
+
+| Status | Traffic | Details |
+| --- | --- | --- |
+| ![Status screen](docs/images/screen-status.png) | ![Traffic screen](docs/images/screen-traffic.png) | ![Details screen](docs/images/screen-details.png) |
+
+Every screen is a stack of widgets you can rearrange, resize or replace, either in
+`/etc/config/utr-lcd` or visually in the LuCI app (Services > LCD Display, Screens tab) with a
+live preview before you save.
+
 ## Requirements
 
 - OpenWrt on the UTR / UTR-LR with the LCD panel driver (`kmod-drm-panel-mipi-dbi`, device tree node
