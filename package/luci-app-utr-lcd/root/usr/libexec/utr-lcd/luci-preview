@@ -16,8 +16,7 @@ LIBEXEC=/usr/libexec/utr-lcd
 SCREEN=${1:-1}; DEMO=${2:-0}; CONF=${3:-}
 shift 3 2>/dev/null
 
-T=/tmp/utr-lcd-preview.$$
-mkdir -p "$T" || exit 1
+T=$(mktemp -d /tmp/utr-lcd-preview.XXXXXX) || exit 1
 trap 'rm -rf "$T"' EXIT INT TERM
 
 printf '%s' "$CONF" | tr '\037' '\n' > "$T/screens.conf"

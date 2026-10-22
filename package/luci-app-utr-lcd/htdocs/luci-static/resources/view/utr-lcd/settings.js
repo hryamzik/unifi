@@ -57,6 +57,7 @@ return view.extend({
 
 	render: function(status) {
 		var m, s, o;
+		var st0 = status || {};
 
 		m = new form.Map('utr-lcd', _('LCD Display'),
 			_('Status display for the UniFi Travel Router LCD. Saving restarts the display service.'));
@@ -69,12 +70,12 @@ return view.extend({
 		o.rmempty = false;
 
 		o = s.option(form.ListValue, 'mode', _('Display mode'),
-			status.stock_installed
+			st0.stock_installed
 				? _('Automatic uses the stock UniFi look (its bundle is installed).')
 				: _('The stock UniFi look is not installed (see the README, optional stock bundle), so the built-in renderer is used.'));
 		o.value('auto', _('Automatic'));
 		o.value('native', _('Built-in renderer'));
-		if (status.stock_installed)
+		if (st0.stock_installed)
 			o.value('stock', _('Stock UniFi look'));
 		o.default = 'auto';
 

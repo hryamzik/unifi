@@ -22,39 +22,39 @@ var ROW = 17;
 
 /* widget types: label, allowed sizes, default size, unit of the size, group */
 var TYPES = {
-	ssid:        { label: 'Network name',          group: 'general', sizes: [16, 24, 32], def: 24 },
-	dbm:         { label: 'Signal strength',       group: 'general', sizes: [16, 24, 32], def: 32 },
-	bars:        { label: 'Signal (bars)',         group: 'general', sizes: [16, 24, 32], def: 24 },
-	sigbar:      { label: 'Signal (line bar)',     group: 'general', sizes: [12, 16, 24], def: 16 },
-	status:      { label: 'Online status',         group: 'general', sizes: [16, 24, 32], def: 16 },
-	fan:         { label: 'Signal (Wi-Fi fan)',    group: 'general', sizes: [24, 32, 48], def: 32 },
-	segbar:      { label: 'Signal (segment bar)',  group: 'general', sizes: [12, 16, 24], def: 16 },
-	clients:     { label: 'Client count',          group: 'general', sizes: [16, 24, 32], def: 24 },
-	wanip:       { label: 'WAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
-	lanip:       { label: 'LAN IP address',        group: 'general', sizes: [12, 16], def: 16 },
-	vpn:         { label: 'VPN',                   group: 'general', sizes: [12, 16], def: 16 },
-	uptime:      { label: 'Uptime',                group: 'general', sizes: [12, 16], def: 16 },
-	rule:        { label: 'Divider line',          group: 'general', sizes: null, def: 2 },
-	speed:       { label: 'Speed down / up',       group: 'traffic', sizes: [16, 24], def: 24 },
-	speed1:      { label: 'Speed down+up (one line)', group: 'traffic', sizes: [16], def: 16 },
-	speedbar:    { label: 'Client speed, down+up (bar)', group: 'traffic', sizes: [12, 16, 20, 24], def: 12 },
-	speeddn:     { label: 'Client download speed (bar)', group: 'traffic', sizes: [12, 16, 20, 24], def: 12 },
-	speedup:     { label: 'Client upload speed (bar)', group: 'traffic', sizes: [12, 16, 20, 24], def: 12 },
-	usage:       { label: 'Total traffic',         group: 'traffic', sizes: [12, 16], def: 16 },
-	usagebar:    { label: 'Client traffic, total (bar)', group: 'traffic', sizes: [12, 16, 20, 24], def: 12 },
-	usagedn:     { label: 'Client downloaded total (bar)', group: 'traffic', sizes: [12, 16, 20, 24], def: 20 },
-	usageup:     { label: 'Client uploaded total (bar)', group: 'traffic', sizes: [12, 16, 20, 24], def: 20 },
-	uplinks:     { label: 'Uplinks (icons, mwan3)', group: 'traffic', sizes: [16, 24], def: 24 },
-	legend:      { label: 'Clients, speed',        group: 'traffic', sizes: [1, 2, 3, 4, 5, 6, 7, 8], def: 4, unit: 'rows' },
-	legendtotal: { label: 'Clients, total',        group: 'traffic', sizes: [1, 2, 3, 4, 5, 6, 7, 8], def: 4, unit: 'rows' },
-	donut:       { label: 'Speed by client (ring)', group: 'traffic', sizes: [48, 64, 80, 96], def: 80, unit: 'px' },
-	multiwan:    { label: 'Multi-WAN shares',      group: 'traffic', sizes: [12, 16], def: 16 },
-	cpu:         { label: 'CPU load',              group: 'resources', sizes: [12, 16], def: 16 },
-	cpuram:      { label: 'CPU + memory (one line)', group: 'resources', sizes: [12, 16], def: 16 },
-	ram:         { label: 'Memory',                group: 'resources', sizes: [12, 16], def: 16 },
-	flash:       { label: 'Flash storage',         group: 'resources', sizes: [12, 16], def: 16 },
-	load:        { label: 'Load average',          group: 'resources', sizes: [12, 16], def: 16 },
-	temp:        { label: 'Wi-Fi chip temperature', group: 'resources', sizes: [12, 16], def: 16 }
+	ssid: { label: _('Network name'),          group: 'general', sizes: [16, 24, 32], def: 24 },
+	dbm: { label: _('Signal strength'),       group: 'general', sizes: [16, 24, 32], def: 32 },
+	bars: { label: _('Signal (bars)'),         group: 'general', sizes: [16, 24, 32], def: 24 },
+	sigbar: { label: _('Signal (line bar)'),     group: 'general', sizes: [12, 16, 24], def: 16 },
+	status: { label: _('Online status'),         group: 'general', sizes: [16, 24, 32], def: 16 },
+	fan: { label: _('Signal (Wi-Fi fan)'),    group: 'general', sizes: [24, 32, 48], def: 32 },
+	segbar: { label: _('Signal (segment bar)'),  group: 'general', sizes: [12, 16, 24], def: 16 },
+	clients: { label: _('Client count'),          group: 'general', sizes: [16, 24, 32], def: 24 },
+	wanip: { label: _('WAN IP address'),        group: 'general', sizes: [12, 16], def: 16 },
+	lanip: { label: _('LAN IP address'),        group: 'general', sizes: [12, 16], def: 16 },
+	vpn: { label: _('VPN'),                   group: 'general', sizes: [12, 16], def: 16 },
+	uptime: { label: _('Uptime'),                group: 'general', sizes: [12, 16], def: 16 },
+	rule: { label: _('Divider line'),          group: 'general', sizes: null, def: 2 },
+	speed: { label: _('Speed down / up'),       group: 'traffic', sizes: [16, 24], def: 24 },
+	speed1: { label: _('Speed down+up (one line)'), group: 'traffic', sizes: [16], def: 16 },
+	speedbar: { label: _('Client speed, down+up (bar)'), group: 'traffic', sizes: [12, 16, 20, 24], def: 12 },
+	speeddn: { label: _('Client download speed (bar)'), group: 'traffic', sizes: [12, 16, 20, 24], def: 12 },
+	speedup: { label: _('Client upload speed (bar)'), group: 'traffic', sizes: [12, 16, 20, 24], def: 12 },
+	usage: { label: _('Total traffic'),         group: 'traffic', sizes: [12, 16], def: 16 },
+	usagebar: { label: _('Client traffic, total (bar)'), group: 'traffic', sizes: [12, 16, 20, 24], def: 12 },
+	usagedn: { label: _('Client downloaded total (bar)'), group: 'traffic', sizes: [12, 16, 20, 24], def: 20 },
+	usageup: { label: _('Client uploaded total (bar)'), group: 'traffic', sizes: [12, 16, 20, 24], def: 20 },
+	uplinks: { label: _('Uplinks (icons, mwan3)'), group: 'traffic', sizes: [16, 24], def: 24 },
+	legend: { label: _('Clients, speed'),        group: 'traffic', sizes: [1, 2, 3, 4, 5, 6, 7, 8], def: 4, unit: 'rows' },
+	legendtotal: { label: _('Clients, total'),        group: 'traffic', sizes: [1, 2, 3, 4, 5, 6, 7, 8], def: 4, unit: 'rows' },
+	donut: { label: _('Speed by client (ring)'), group: 'traffic', sizes: [48, 64, 80, 96], def: 80, unit: 'px' },
+	multiwan: { label: _('Multi-WAN shares'),      group: 'traffic', sizes: [12, 16], def: 16 },
+	cpu: { label: _('CPU load'),              group: 'resources', sizes: [12, 16], def: 16 },
+	cpuram: { label: _('CPU + memory (one line)'), group: 'resources', sizes: [12, 16], def: 16 },
+	ram: { label: _('Memory'),                group: 'resources', sizes: [12, 16], def: 16 },
+	flash: { label: _('Flash storage'),         group: 'resources', sizes: [12, 16], def: 16 },
+	load: { label: _('Load average'),          group: 'resources', sizes: [12, 16], def: 16 },
+	temp: { label: _('Wi-Fi chip temperature'), group: 'resources', sizes: [12, 16], def: 16 }
 };
 
 /* one-line explanations, shown in the widget's Options cell (the details nobody can guess) */
@@ -391,7 +391,7 @@ return view.extend({
 			var w = sc.widgets[wi], t = TYPES[w[0]];
 			var joinFull = !w[2] && groupSize(sc.widgets, wi) >= 3;
 			return E('tr', {}, [
-				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, _(TYPES[k].label) ]; }), w[0], function(v) {
+				E('td', {}, select(Object.keys(TYPES).map(function(k) { return [ k, TYPES[k].label ]; }), w[0], function(v) {
 					w[0] = v; w[1] = TYPES[v].def; w[3] = w[4] = false; w[5] = 0; w[6] = 0; w[7] = 0; w[8] = false; w[9] = false; w[10] = false; w[11] = false; w[12] = false; w[13] = false; w[14] = false; w[15] = 0; w[16] = false; redraw();
 				}, { 'style': 'width:100%; max-width:13em' })),
 				E('td', { 'style': 'text-align:center' }, E('input', { 'type': 'checkbox', 'title': _('Share one line with the next widget (up to three)'),
@@ -429,7 +429,7 @@ return view.extend({
 			} }, [ E('option', { 'value': '' }, addOptions[0][1]) ].concat([ 'general', 'traffic', 'resources' ].map(function(g) {
 				return E('optgroup', { 'label': groups[g] }, Object.keys(TYPES).filter(function(k) { return TYPES[k].group === g; }).map(function(k) {
 					var fits = widgetHeight(k, TYPES[k].def) <= remaining;
-					return E('option', { 'value': k, 'disabled': fits ? null : '' }, _(TYPES[k].label) + ' (' + widgetHeight(k, TYPES[k].def) + ' px)');
+					return E('option', { 'value': k, 'disabled': fits ? null : '' }, TYPES[k].label + ' (' + widgetHeight(k, TYPES[k].def) + ' px)');
 				}));
 			})));
 			if (sc.widgets.length >= MAX_WIDGETS) addSel.disabled = true;
@@ -457,7 +457,7 @@ return view.extend({
 					check(sc.enabled, function(v) { sc.enabled = v; redraw(); }, _('In rotation')),
 					select([ [ 'auto', _('Spacing: auto') ], [ '0', _('Spacing: 0 px') ], [ '1', _('Spacing: 1 px') ], [ '2', _('Spacing: 2 px') ], [ '4', _('Spacing: 4 px') ], [ '6', _('Spacing: 6 px') ], [ '8', _('Spacing: 8 px') ], [ '12', _('Spacing: 12 px') ], [ '18', _('Spacing: 18 px') ] ], sc.spacing, function(v) { sc.spacing = v; redraw(); }),
 					check(sc.backfill, function(v) { sc.backfill = v; redraw(); }, _('Signal background')),
-				check(sc.debug, function(v) { sc.debug = v; redraw(); }, _('Debug line')),
+					check(sc.debug, function(v) { sc.debug = v; redraw(); }, _('Debug line')),
 					btn('\u2191', function() { move(screens, si, -1); redraw(); }, si === 0, _('Move screen up')),
 					btn('\u2193', function() { move(screens, si, 1); redraw(); }, si === screens.length - 1, _('Move screen down')),
 					btn(_('Remove screen'), function() {
@@ -593,6 +593,7 @@ return view.extend({
 			uci.set('utr-lcd', sid, 'enabled', s.enabled ? '1' : '0');
 			uci.set('utr-lcd', sid, 'indicator', 'none');
 			uci.set('utr-lcd', sid, 'backfill', s.backfill ? '1' : '0');
+			uci.set('utr-lcd', sid, 'debug', s.debug ? '1' : '0');
 			var wlist = [], line = [];
 			s.widgets.forEach(function(w, i) {
 				line.push(widgetSpec(w));
