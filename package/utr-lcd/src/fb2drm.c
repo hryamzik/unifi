@@ -18,6 +18,8 @@
 static volatile sig_atomic_t stop;
 static void on_sig(int s) { (void)s; stop = 1; }
 
+#define UTR_LCD_VERSION "0.1.2"
+
 int main(int argc, char **argv)
 {
 	const char *file = "/var/run/utr-lcd/fb0.raw";
@@ -28,6 +30,11 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "-y") && i + 1 < argc) oy = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-i") && i + 1 < argc) interval = atoi(argv[++i]);
 		else if (!strcmp(argv[i], "-0")) rotate = 0;
+		else if (!strcmp(argv[i], "--version")) { printf("utr-lcd-fb2drm %s\n", UTR_LCD_VERSION); return 0; }
+		else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+			printf("usage: %s [-f file] [-x N] [-y N] [-i ms] [-0]\n", argv[0]);
+			return 0;
+		}
 		else { fprintf(stderr, "usage: %s [-f file] [-x N] [-y N] [-i ms] [-0]\n", argv[0]); return 2; }
 	}
 	if (interval < 20) interval = 20;

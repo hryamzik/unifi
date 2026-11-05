@@ -1988,6 +1988,8 @@ static int backlight_off(void)
 	return v == 0;
 }
 
+#define UTR_LCD_VERSION "0.1.2"
+
 int main(int argc, char **argv)
 {
 	const char *cmd = "/usr/libexec/utr-lcd/collect.sh", *conf = "/var/run/utr-lcd/screens.conf", *tfile = "/var/run/utr-lcd/traffic";
@@ -2002,6 +2004,11 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "-1")) once = 1;
 		else if (!strcmp(argv[i], "-l")) list = 1;
 		else if (!strcmp(argv[i], "-P")) headless = once = 1;
+		else if (!strcmp(argv[i], "--version")) { printf("utr-lcd-status %s\n", UTR_LCD_VERSION); return 0; }
+		else if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) {
+			printf("usage: %s [-c collector] [-C screens.conf] [-T traffic] [-i sec] [-0] [-1 [-N screen]] [-P] [-l]\n", argv[0]);
+			return 0;
+		}
 		else {
 			fprintf(stderr, "usage: %s [-c collector] [-C screens.conf] [-T traffic] [-i sec] [-0] [-1 [-N screen]] [-P] [-l]\n", argv[0]);
 			return 2;
