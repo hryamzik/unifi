@@ -18,7 +18,7 @@
 static volatile sig_atomic_t stop;
 static void on_sig(int s) { (void)s; stop = 1; }
 
-#define UTR_LCD_VERSION "0.1.2"
+#define UTR_LCD_VERSION "0.1.3"
 
 int main(int argc, char **argv)
 {

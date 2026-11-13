@@ -16,7 +16,8 @@ case "$1" in
 	echo "stock bundle removed"
 	/etc/init.d/utr-lcd restart 2>/dev/null
 	exit 0 ;;
-''|-h|--help) sed -n '2,10p' "$0"; exit 1 ;;
+--version) echo "utr-lcd-stock-install 0.1.3"; exit 0 ;;
+''|-h|--help) sed -n '2,10p' "$0"; [ "$1" = '' ] && exit 1; exit 0 ;;
 esac
 
 [ -f "$1" ] || die "no such file: $1"

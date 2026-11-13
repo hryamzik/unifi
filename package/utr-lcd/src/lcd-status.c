@@ -1988,7 +1988,7 @@ static int backlight_off(void)
 	return v == 0;
 }
 
-#define UTR_LCD_VERSION "0.1.2"
+#define UTR_LCD_VERSION "0.1.3"
 
 int main(int argc, char **argv)
 {
